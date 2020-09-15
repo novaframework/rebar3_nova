@@ -2,7 +2,7 @@
 
 -export([init/1, do/1, format_error/1]).
 
--define(PROVIDER, nova).
+-define(PROVIDER, help).
 -define(DEPS, [app_discovery]).
 
 %% ===================================================================
@@ -26,7 +26,7 @@ init(State) ->
 
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
-    io_lib:format("State: ~p", [State]),
+    io:format("This is Nova!"),
     {ok, State}.
 
 -spec format_error(any()) ->  iolist().
