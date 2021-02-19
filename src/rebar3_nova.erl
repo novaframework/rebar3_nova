@@ -4,7 +4,7 @@
 
 -spec init(rebar_state:t()) -> {ok, rebar_state:t()}.
 init(State) ->
-    lists:foldl(fun provider_init/2, {ok, State}, [rebar3_nova_prv]).
+    lists:foldl(fun provider_init/2, {ok, State}, [rebar3_nova_prv, rebar3_nova_serve]).
 
 provider_init(Module, {ok, State}) ->
     Module:init(State).
