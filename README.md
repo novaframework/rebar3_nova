@@ -9,11 +9,15 @@ A rebar plugin for nova
 
 ## Basic usage
 
-Add the plugin to your rebar config:
+Add the plugin to your rebar config ( ~/.config/rebar3/rebar.config):
 
     {plugins, [
         {rebar3_nova, {git, "https://github.com/novaframework/rebar3_nova.git", {branch, "master"}}}
     ]}.
+
+For latest stable from hex:
+    
+    {plugins, [rebar3_nova]}.
 
 Then just call your plugin directly in an existing application:
 
