@@ -3,5 +3,7 @@
          index/1
         ]).
 
+-include_lib("nova/include/nova.hrl").
+
 index(#{req := #{method := <<"GET">>}} = _NovaReq) ->
-    {ok, [{message, "Nova is running!"}]}.
+    {ok, [{message, "Hello world!"}]}.
