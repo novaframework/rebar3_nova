@@ -156,12 +156,6 @@ compile_file(<<".erl">>, Filename) ->
             nova_router:process_routefile(Application);
         false ->
             case compile:file(Filename, [binary|ErlOpts]) of
-                {ok, ModuleName} ->
-                    rebar_api:info("Compiled ~p", [ModuleName]),
-                    code:purge(ModuleName);
-                {ok, ModuleName, Warnings} ->
-                    rebar_api:warn("Compiled ~p with warnings: ~p", [ModuleName, Warnings]),
-                    code:purge(ModuleName);
                 {ok, ModuleName, Binary} when is_binary(Binary) ->
                     rebar_api:info("Compiled ~p", [ModuleName]),
                     {module, _Mod} = code:load_binary(ModuleName, Filename, Binary),
@@ -173,7 +167,7 @@ compile_file(<<".erl">>, Filename) ->
                 {error,Errors,Warnings} ->
                     rebar_api:error("Could not compile ~p. Exited with errors: ~p~nWarnings: ~p", [Filename, Errors, Warnings]),
                     ok;
-                error ->
+                _ ->
                     rebar_api:error("Could not compile ~p.", [Filename]),
                     ok
             end
