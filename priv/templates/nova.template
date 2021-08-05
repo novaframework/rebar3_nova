@@ -5,18 +5,19 @@
 
 {dir, "{{name}}"}.
 {dir, "{{name}}/priv"}.
+{dir, "{{name}}/priv/assets"}.
 {dir, "{{name}}/config"}.
 {dir, "{{name}}/src/controllers"}.
 {dir, "{{name}}/src/views"}.
 
-{template, "nova/dev_sys.config", "{{name}}/config/dev_sys.config"}.
-{template, "nova/prod_sys.config", "{{name}}/config/prod_sys.config"}.
+{template, "nova/dev_sys.config.src", "{{name}}/config/dev_sys.config.src"}.
+{template, "nova/prod_sys.config.src", "{{name}}/config/prod_sys.config.src"}.
 {template, "nova/routes.erl", "{{name}}/priv/{{name}}.routes.erl"}.
 {template, "nova/app.src", "{{name}}/src/{{name}}.app.src"}.
 {template, "nova/app.erl", "{{name}}/src/{{name}}_app.erl"}.
 {template, "nova/sup.erl", "{{name}}/src/{{name}}_sup.erl"}.
 {template, "nova/controller.erl", "{{name}}/src/controllers/{{name}}_main_controller.erl"}.
 {template, "nova/rebar.config", "{{name}}/rebar.config"}.
-{template, "nova/vm.args", "{{name}}/config/vm.args"}.
+{template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
 
 {file, "nova/controller.dtl", "{{name}}/src/views/{{name}}_main.dtl"}.
