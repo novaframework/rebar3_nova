@@ -18,7 +18,8 @@
          {plugins, [
                     {pre_http_request, nova_security_plugin, #{}, 0},
                     {pre_ws_upgrade, nova_security_plugin, #{}, 0}
-                   ]}
+                   ]},
+         {nova, route_reader, { {{name}}_routing, routes}}
         ]}
   %% Please change your app.src-file instead if you intend to add app-specific configurations
 ].

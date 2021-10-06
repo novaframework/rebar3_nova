@@ -1,10 +1,10 @@
-(defmodule {{name}}_routes
+(defmodule {{name}}_routing
   (export
-   (dispatch 0)))
+   (routes 1)))
 
 (include-lib "logjam/include/logjam.hrl")
 
-(defun dispatch (
+(defun routes (({{ name }})
    #m(prefix ""
       security false
       routes (#("/"
