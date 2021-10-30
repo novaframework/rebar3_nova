@@ -4,7 +4,9 @@
   {registered, []},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    nova,
+    routing_tree
    ]},
   {env,[]},
   {modules, []},
