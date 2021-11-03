@@ -49,7 +49,7 @@ check_for_rebar3() ->
                     os:cmd("wget https://s3.amazonaws.com/rebar3/rebar3 && chmod +x rebar3"),
                     os:cmd("./rebar3 local install"),
                     os:cmd("rm rebar3"),
-                    print(?TERM_BLUE, ["Rebar3 is now installed. " ++ ?TERM_BOLD ++ "Remember to set your $PATH: export PATH=" ++ os:get_env_var("HOME") ++ "/.cache/rebar3/bin:$PATH"]),
+                    print(?TERM_BLUE, ["Rebar3 is now installed. " ++ ?TERM_BOLD ++ "Remember to set your $PATH: export PATH=" ++ os:getenv("HOME") ++ "/.cache/rebar3/bin:$PATH"]),
                     print(?TERM_BLUE, ["Continues with the installation"]),
                     ok;
                 no ->
@@ -88,7 +88,7 @@ main([]) ->
     case check_for_rebar3() of
         ok ->
             %% Continue with the installation
-            Filepath = os:get_env_var("HOME"),
+            Filepath = os:getenv("HOME"),
             Rebar3Config = filename:join(Filepath, ".config/rebar3/rebar.config"),
             case file:consult(Rebar3Config) of
                 {ok, Terms} ->
