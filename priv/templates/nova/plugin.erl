@@ -14,12 +14,12 @@
 %% Pre-request callback
 %% @end
 %%--------------------------------------------------------------------
--spec pre_request(State :: nova_http_handler:nova_http_state(), Options :: map()) ->
-                         {ok, State0 :: nova_http_handler:nova_http_state()} |
-                         {stop, State0 :: nova_http_handler:nova_http_state()} |
+-spec pre_request(Req :: cowboy_req:req(), Options :: map()) ->
+                         {ok, Req0 :: cowboy_req:req()} |
+                         {stop, Req0 :: cowboy_req:req()} |
                          {error, Reason :: term()}.
-pre_request(State, _Options) ->
-    {ok, State}.
+pre_request(Req, _Options) ->
+    {ok, Req}.
 
 
 %%--------------------------------------------------------------------
@@ -27,12 +27,12 @@ pre_request(State, _Options) ->
 %% Post-request callback
 %% @end
 %%--------------------------------------------------------------------
--spec post_request(State :: nova_http_handler:nova_http_state(), Options :: map()) ->
-                          {ok, State0 :: nova_http_handler:nova_http_state()} |
-                          {stop, State0 :: nova_http_handler:nova_http_state()} |
+-spec post_request(Req :: cowboy_req:req(), Options :: map()) ->
+                          {ok, Req0 :: cowboy_req:req()} |
+                          {stop, Req0 :: cowboy_req:req()} |
                           {error, Reason :: term()}.
-post_request(State, _Options) ->
-    {ok, State}.
+post_request(Req, _Options) ->
+    {ok, Req}.
 
 
 %%--------------------------------------------------------------------
