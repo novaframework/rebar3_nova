@@ -18,7 +18,7 @@
          {plugins, [
                     {pre_request, nova_request_plugin, #{parse_bindings => true}}
                    ]},
-         {nova, route_reader, { {{name}}_routing, routes}}
+         {route_reader, { {{name}}_routing, routes}}
         ]}
   %% Please change your app.src-file instead if you intend to add app-specific configurations
 ].
