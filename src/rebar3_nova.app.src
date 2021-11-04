@@ -6,7 +6,8 @@
    [kernel,
     stdlib,
     nova,
-    routing_tree
+    routing_tree,
+    enotify
    ]},
   {env,[]},
   {modules, []},
