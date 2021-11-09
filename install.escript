@@ -60,6 +60,21 @@ check_for_rebar3() ->
             ok
     end.
 
+rebar3_config_path() ->
+    filename:join([os:getenv("HOME"), ".config", "rebar3", "rebar.config"]).
+
+consult_rebar3_config() ->
+    case file:consult(rebar3_config_path()) of
+        {ok, Terms} ->
+            {ok, Terms};
+        {error, enoent} ->
+            %% File doesn't exist, we'll start with an empty config and create
+            %% the file later.
+            {ok, []};
+        {error, Error} ->
+            {error, Error}
+    end.
+
 inject_nova_plugin([]) -> [?NOVA_PLUGIN];
 inject_nova_plugin([{rebar3_nova, _}|_] = L) ->
     L;
@@ -75,12 +90,14 @@ inject_plugin([Hd|Tl], false) ->
 
 
 write_terms_to_file(Filename, Terms) ->
-    {ok, IoDevice} = file:open(Filename, [write]),
     TermsRep = lists:map(fun(Term) ->
                                  io_lib:format("~p.~n", [Term])
                          end, Terms),
-    file:write(IoDevice, TermsRep).
+    ok = filelib:ensure_dir(Filename),
+    ok = file:write_file(Filename, TermsRep).
 
+write_rebar3_config(Terms) ->
+    write_terms_to_file(rebar3_config_path(), Terms).
 
 
 main([]) ->
@@ -88,22 +105,20 @@ main([]) ->
     case check_for_rebar3() of
         ok ->
             %% Continue with the installation
-            Filepath = os:getenv("HOME"),
-            Rebar3Config = filename:join(Filepath, ".config/rebar3/rebar.config"),
-            case file:consult(Rebar3Config) of
-                {ok, Terms} ->
+            case consult_rebar3_config() of
+                {ok, Rebar3Config} ->
                     %% Inject the nova plugin
-                    UpdatedRebar3Config = inject_plugin(Terms, false),
-                    write_terms_to_file(Rebar3Config, UpdatedRebar3Config),
+                    UpdatedRebar3Config = inject_plugin(Rebar3Config, false),
+                    write_rebar3_config(UpdatedRebar3Config),
                     print(?TERM_GREEN, ?NOVA_LOGO),
                     print(?TERM_GREEN, [""]),
                     print(?TERM_GREEN, ["Congratulations, you have installed Nova plugin for rebar3!"]),
                     print(?TERM_GREEN, ["Try it out with typing:"]),
                     print(?TERM_BLUE, ["$ rebar3 new nova my_first_app"]);
                 {error, _} ->
-                    %% File did not exist :/
-                    print(?TERM_RED, ["Reading rebar3 configuration failed. Check your file (and if it does not exist - create it). The file is:"]),
-                    print(?TERM_YELLOW, Rebar3Config)
+                    %% Failed to read rebar3 config file :/
+                    print(?TERM_RED, ["Reading rebar3 configuration failed. Check your rebar.config file:"]),
+                    print(?TERM_YELLOW, [rebar3_config_path()])
             end;
         _ ->
             print(?TERM_RED, ["Exiting installation"])
