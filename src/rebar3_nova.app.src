@@ -1,6 +1,6 @@
 {application, rebar3_nova,
  [{description, "A rebar plugin"},
-  {vsn, "0.3.2"},
+  {vsn, "0.3.3"},
   {registered, []},
   {applications,
    [kernel,
