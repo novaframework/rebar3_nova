@@ -12,10 +12,10 @@
 
 {template, "nova/dev_sys.config.src", "{{name}}/config/dev_sys.config.src"}.
 {template, "nova/prod_sys.config.src", "{{name}}/config/prod_sys.config.src"}.
-{template, "nova/routes.erl", "{{name}}/priv/{{name}}.routes.erl"}.
 {template, "nova/app.src", "{{name}}/src/{{name}}.app.src"}.
 {template, "nova/app.erl", "{{name}}/src/{{name}}_app.erl"}.
 {template, "nova/sup.erl", "{{name}}/src/{{name}}_sup.erl"}.
+{template, "nova/router.erl", "{{name}}/src/{{name}}_router.erl"}.
 {template, "nova/controller.erl", "{{name}}/src/controllers/{{name}}_main_controller.erl"}.
 {template, "nova/rebar.config", "{{name}}/rebar.config"}.
 {template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
