@@ -10,6 +10,7 @@
             ]}
           ]},
  {nova, [
+         {environment, prod},
          {cowboy_configuration, #{
                                   port => 8080
                                  }},

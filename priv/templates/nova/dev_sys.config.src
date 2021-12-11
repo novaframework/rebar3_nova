@@ -8,6 +8,7 @@
               #{ formatter => {logger_formatter, #{ }}}}]}
           ]},
  {nova, [
+         {environment, dev},
          {cowboy_configuration, #{
                                   port => 8080
                                  }},
