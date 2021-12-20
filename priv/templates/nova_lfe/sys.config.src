@@ -8,6 +8,7 @@
               #{ formatter => {logger_formatter, #{ }}}}]}
           ]},
  {nova, [
+         {environment, dev},
          {cowboy_configuration, #{
                                   port => 8080
                                  }},
@@ -17,8 +18,7 @@
          %% Priority is that the lowest number is executed first
          {plugins, [
                     {pre_request, nova_request_plugin, #{parse_bindings => true}}
-                   ]},
-         {route_reader, { {{name}}_routing, routes}}
+                   ]}
         ]}
   %% Please change your app.src-file instead if you intend to add app-specific configurations
 ].
