@@ -9,7 +9,7 @@
                                       colored => true,
                                       template => [colored_start, "[\033[1m", level, "\033[0m", colored_start,"] [", time, "]",
                                                    colored_end, " ", msg, " (", mfa, ")\n"]
-                                     }}},
+                                     }}}
           ]},
  {nova, [
          {environment, dev},
