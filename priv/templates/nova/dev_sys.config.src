@@ -3,11 +3,16 @@
 [
  {kernel, [
            {logger_level, debug},
-           {logger,
-            [{handler, default, logger_std_h,
-              #{ formatter => {logger_formatter, #{ }}}}]}
+           #{formatter => {flatlog, #{
+                                      map_depth => 3,
+                                      term_depth => 50,
+                                      colored => true,
+                                      template => [colored_start, "[\033[1m", level, "\033[0m", colored_start,"] [", time, "]",
+                                                   colored_end, " ", msg, " (", mfa, ")\n"]
+                                     }}},
           ]},
  {nova, [
+         {environment, dev},
          {cowboy_configuration, #{
                                   port => 8080
                                  }},

@@ -1,4 +1,4 @@
-(defmodule {{name}}_routing
+(defmodule {{name}}_router
   (export
    (routes 1)))
 
