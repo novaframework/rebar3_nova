@@ -6,7 +6,7 @@
            {logger,
             [{handler, default, logger_std_h,
               #{level => error,
-                config => #{file => "log/erlang.log"}}},
+                config => #{file => "log/erlang.log"}}}
             ]}
           ]},
  {nova, [
