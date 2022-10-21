@@ -148,34 +148,26 @@ remove_from_plugin_paths(State) ->
 
 compile_file(<<".erl">>, Filename) ->
     ErlOpts = [],
-    case is_routefile(Filename) of
-        true ->
-            [AppFile|_] = filelib:wildcard(filename:dirname(Filename) ++ "/../src/*.app.src"),
-            {ok, [{application, Application, _}|_]} = file:consult(AppFile),
-            rebar_api:info("Reloading routefile ~p", [Application]),
-            nova_router:process_routefile(Application);
-        false ->
-            case compile:file(Filename, [binary|ErlOpts]) of
-                {ok, ModuleName, Binary} when is_binary(Binary) ->
-                    rebar_api:info("Compiled ~p", [ModuleName]),
-                    {module, _Mod} = code:load_binary(ModuleName, Filename, Binary),
-                    code:purge(ModuleName);
-                {ok,ModuleName,Binary,Warnings} ->
-                    rebar_api:warn("Compiled ~p with warnings: ~p", [ModuleName, Warnings]),
-                    {module, _Mod} = code:load_binary(ModuleName, Filename, Binary),
-                    code:purge(ModuleName);
-                {error,Errors,Warnings} ->
-                    rebar_api:error("Could not compile ~p. Exited with errors: ~p~nWarnings: ~p", [Filename, Errors, Warnings]),
-                    ok;
-                _ ->
-                    rebar_api:error("Could not compile ~p.", [Filename]),
-                    ok
-            end
+    case compile:file(Filename, [binary|ErlOpts]) of
+        {ok, ModuleName, Binary} when is_binary(Binary) ->
+            rebar_api:info("Compiled ~p", [ModuleName]),
+            {module, _Mod} = code:load_binary(ModuleName, Filename, Binary),
+            reload_if_router(ModuleName),
+            code:purge(ModuleName);
+        {ok,ModuleName,Binary,Warnings} ->
+            rebar_api:warn("Compiled ~p with warnings: ~p", [ModuleName, Warnings]),
+            {module, _Mod} = code:load_binary(ModuleName, Filename, Binary),
+            reload_if_router(ModuleName),
+            code:purge(ModuleName);
+        {error,Errors,Warnings} ->
+            rebar_api:error("Could not compile ~p. Exited with errors: ~p~nWarnings: ~p", [Filename, Errors, Warnings]),
+            ok;
+        _ ->
+            rebar_api:error("Could not compile ~p.", [Filename]),
+            ok
     end;
 
 compile_file(<<".dtl">>, Filename) ->
-
-
     case erlang:module_loaded(erlydtl) of
         true ->
             %% Continue with the compilation
@@ -205,11 +197,22 @@ compile_file(<<".dtl">>, Filename) ->
             compile_file(<<".dtl">>, Filename)
     end.
 
+reload_if_router(Module) ->
+    case is_nova_router(Module) of
+        true ->
+            %% Tell nova to reload paths
+            ok;
+        _ ->
+            ok
+    end.
 
-is_routefile([]) ->
-    false;
-is_routefile(".routes.erl") ->
-    %% Reload routes
-    true;
-is_routefile([_|Tl]) ->
-    is_routefile(Tl).
+is_nova_router(Module) ->
+    Attributes = Module:module_info(attributes),
+    case proplists:get_value(behaviour, Attributes) of
+        undefined ->
+            %% This does not have any behaviour so continue
+            nova_router:compile([Module]);
+        Behaviours ->
+            %% Following will return true/false depending if nova_router is behaviours
+            proplists:get_value(nova_router, Behaviours)
+    end.
