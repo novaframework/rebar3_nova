@@ -81,10 +81,10 @@
 
       @keyframes animStar {
           from {
-              transform: translateY(0px);
+              transform: translate3d(0, 0px, 0);
           }
           to {
-              transform: translateY(-2000px);
+              transform: translateY(0, -2000px, 0);
           }
       }
     </style>
