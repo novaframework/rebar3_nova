@@ -17,8 +17,8 @@
 {template, "nova/sup.erl", "{{name}}/src/{{name}}_sup.erl"}.
 {template, "nova/router.erl", "{{name}}/src/{{name}}_router.erl"}.
 {template, "nova/controller.erl", "{{name}}/src/controllers/{{name}}_main_controller.erl"}.
-{template, "nova/favicon.ico", "{{name}}/priv/assets/favicon.ico"}.
 {template, "nova/rebar.config", "{{name}}/rebar.config"}.
 {template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
 
+{file, "nova/favicon.ico", "{{name}}/priv/assets/favicon.ico"}.
 {file, "nova/controller.dtl", "{{name}}/src/views/{{name}}_main.dtl"}.

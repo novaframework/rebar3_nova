@@ -17,8 +17,8 @@
 {template, "nova_lfe/sup.lfe", "{{name}}/src/sup.lfe"}.
 {template, "nova_lfe/router.lfe", "{{name}}/src/{{name}}_router.lfe"}.
 {template, "nova_lfe/controller.lfe", "{{name}}/src/controllers/{{name}}_main_controller.lfe"}.
-{template, "nova/favicon.ico", "{{name}}/priv/assets/favicon.ico"}.
 {template, "nova_lfe/rebar.config", "{{name}}/rebar.config"}.
 {template, "nova/vm.args.src", "{{name}}/config/vm.args"}.
 
+{file, "nova/favicon.ico", "{{name}}/priv/assets/favicon.ico"}.
 {file, "nova/controller.dtl", "{{name}}/src/views/{{name}}_main.dtl"}.
