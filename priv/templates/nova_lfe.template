@@ -20,4 +20,5 @@
 {template, "nova_lfe/rebar.config", "{{name}}/rebar.config"}.
 {template, "nova/vm.args.src", "{{name}}/config/vm.args"}.
 
+{file, "nova/favicon.ico", "{{name}}/priv/assets/favicon.ico"}.
 {file, "nova/controller.dtl", "{{name}}/src/views/{{name}}_main.dtl"}.
