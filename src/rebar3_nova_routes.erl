@@ -63,7 +63,7 @@ format_tree([#node{segment = Segment, value = [], children = Children}|Tl], Dept
                 Segment;
             _ when is_integer(Segment) ->
                 erlang:integer_to_list(Segment);
-            E ->
+            _Catchall ->
                 "[...]"
         end,
     Prefix = [ $  || _X <- lists:seq(0, Depth*4) ],
@@ -84,13 +84,13 @@ format_tree([#node{segment = Segment, value = Value, children = Children}|Tl], D
                 Segment;
             _ when is_integer(Segment) ->
                 erlang:integer_to_list(Segment);
-            E ->
+            _CatchAll ->
                 "[...]"
         end,
     Prefix = [ $  || _X <- lists:seq(0, Depth*4) ],
 
-    lists:foreach(fun(#node_comp{comparator = Method, value = Value}) ->
-                          {App, Mod, Func} = case Value of
+    lists:foreach(fun(#node_comp{comparator = Method, value = Value0}) ->
+                          {App, Mod, Func} = case Value0 of
                                                  #nova_handler_value{app = App0, module = Mod0, function = Func0} -> {App0, Mod0, Func0};
                                                  #cowboy_handler_value{app = App0, handler = Handler} -> {App0, Handler, init}
                                              end,
