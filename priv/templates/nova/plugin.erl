@@ -1,4 +1,4 @@
--module({{pluginname}}_plugin).
+-module({{name}}_plugin).
 -behaviour(nova_plugin).
 
 -export([
