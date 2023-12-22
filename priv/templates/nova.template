@@ -1,6 +1,7 @@
 {description, "Basic Nova project"}.
 {variables, [
-    {name, "project", "Name of the project"}
+    {name, "project", "Name of the project"},
+    {use_bossdb, "", "Set to 1 to enable bossdb"}
 ]}.
 
 {dir, "{{name}}"}.
