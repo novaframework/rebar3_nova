@@ -31,7 +31,7 @@ init([]) ->
     {{#use_bossdb}}
     %% Start boss_db
     Configuration = application:get_env({{name}}, database_configuration, #{}),
-    setup_bossdb(Configuration),
+    setup_bossdb(maps:to_list(Configuration)),
     {{/use_bossdb}}
     {ok, { {one_for_all, 0, 1}, []} }.
 
@@ -39,10 +39,10 @@ init([]) ->
 %% Internal functions
 %%====================================================================
 {{#use_bossdb}}
-setup_bossdb(#{}) ->
+setup_bossdb({}) ->
     logger:warning(#{msg => "Could not start boss_db because of empty configuration"});
 setup_bossdb(Configuration) ->
     logger:debug(#{msg => "Starting boss_db with config", config => Configuration}),
-    boss_db:start(maps:to_list(Configuration)),
+    boss_db:start(Configuration),
     boss_news:start().
 {{/use_bossdb}}
