@@ -30,7 +30,7 @@ start_link() ->
 init([]) ->
     {{#use_bossdb}}
     %% Start boss_db
-    Configuration = application:get_env(nova, database_configuration, #{}),
+    Configuration = application:get_env({{name}}, database_configuration, #{}),
     setup_bossdb(Configuration),
     {{/use_bossdb}}
     {ok, { {one_for_all, 0, 1}, []} }.
