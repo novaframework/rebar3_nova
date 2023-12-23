@@ -36,78 +36,67 @@ do(State) ->
            end,
     [begin
          Opts = rebar_app_info:opts(AppInfo),
-         Dir = rebar_app_info:dir(AppInfo),
          OutDir = rebar_app_info:ebin_dir(AppInfo),
-
-         NovaModelOpts = proplists:unfold(rebar_opts:get(Opts, nova_models, [])),
-         lists:foreach(fun(NovaModelOpts0) ->
-                               ModelDir = filename:join(Dir, option(model_dir, NovaModelOpts0)),
-                               NovaModelOpts1 = [{model_dir, ModelDir}|proplists:delete(model_dir, NovaModelOpts0)],
-                               filelib:ensure_dir(filename:join(OutDir, "dummy.beam")),
-
-                               rebar_base_compiler:run(Opts,
-                                                       [],
-                                                       ModelDir,
-                                                       option(source_ext, NovaModelOpts1),
-                                                       OutDir,
-                                                       option(module_ext, NovaModelOpts1) ++ ".beam",
-                                                       fun(S, T, C) ->
-                                                               compile_models(C, S, T, NovaModelOpts1, Dir, OutDir)
-                                                       end,
-                                                       [{check_last_mod, false},
-                                                        {recursive, option(recursive, NovaModelOpts1)}])
-                       end, expand_opts(NovaModelOpts))
+         ModelOpts = proplists:unfold(rebar_opts:get(Opts, nova_models, [])),
+	 
+	 filelib:ensure_dir(filename:join(OutDir, "dummy.beam")),
+	 rebar_base_compiler:run(Opts,
+				 [],
+				 option(model_dir, ModelOpts),
+				 option(source_ext, ModelOpts),
+				 OutDir,
+				 option(module_ext, ".beam"),
+				 fun(S, T, _C) ->
+					 compile_models(S, T, OutDir, ModelOpts, Opts)
+				 end,
+				 [{check_last_mod, false},
+				  {recursive, option(recursive, ModelOpts)}])
      end || AppInfo <- Apps],
     {ok, State}.
 
-expand_opts(Opts) ->
-    SharedOpts = lists:filter(fun(X) -> is_tuple(X) end, Opts),
-    OptsLists  = case lists:filter(fun(X) -> is_list(X) end, Opts) of
-                   [] -> [[]];
-                   L  -> L
-                 end,
-    lists:map(fun(X) -> lists:ukeymerge(1, proplists:unfold(X), SharedOpts) end, OptsLists).
-
-option(Opt, DtlOpts) ->
-    proplists:get_value(Opt, DtlOpts, default(Opt)).
+option(Opt, Opts) ->
+    proplists:get_value(Opt, Opts, default(Opt)).
 
 default(app) -> undefined;
 default(model_dir) -> "src/models";
 default(source_ext) -> ".erl";
-default(module_ext) -> "_model";
-default(compiler_options) -> [debug_info, return];
+default(module_ext) -> ".beam";
+default(out_dir) -> "ebin";
+default(compiler_options) -> [verbose, return_errors];
 default(recursive) -> true.
 
 
-compile_models(_, Source, Target, DtlOpts, Dir, OutDir) ->
-    case needs_compile(Source, Target, DtlOpts) of
+compile_models(Source, Target, OutDir, ModelOpts, Opts) ->
+    case needs_compile(Source, Target) of
         true ->
-            do_compile(Source, Target, DtlOpts, Dir, OutDir);
+            do_compile(Source, Target, OutDir, ModelOpts, Opts);
         false ->
             skipped
     end.
 
-do_compile(Source, Target, ModelOpts, Dir, OutDir) ->
+do_compile(Source, Target, OutDir, ModelOpts, Opts) ->
     CompilerOptions = option(compiler_options, ModelOpts),
-
+    LocalOutDir = option(out_dir, ModelOpts),
+    OutDir0 = filename:join([OutDir, LocalOutDir]),
     Sorted = proplists:unfold(
                lists:sort(
-                 [{out_dir, OutDir},
-                  {model_dir, filename:join(Dir, option(model_dir, ModelOpts))},
+                 [{out_dir, OutDir0},
+                  {model_dir, option(model_dir, ModelOpts)},
                   {compiler_options, CompilerOptions}])),
 
     %% ensure that doc_root and out_dir are defined,
     %% using defaults if necessary
-    Opts = lists:ukeymerge(1, ModelOpts, Sorted),
+    OptsU = lists:ukeymerge(1, ModelOpts, Sorted),
+
     rebar_api:debug("Compiling \"~s\" -> \"~s\" with options:~n    ~s",
-                    [Source, Target, io_lib:format("~p", [Opts])]),
-    case boss_record_compiler:compile(Source, ModelOpts) of
-        {ok, _Mod} ->
+                    [Source, Target, io_lib:format("~p", [OptsU])]),
+    case boss_record_compiler:compile(Source, OptsU) of
+        {ok, Mod} ->
             ok;
-        _ ->
-            rebar_base_compiler:error_tuple(Source, [], [], Opts)
+        Err ->
+            rebar_base_compiler:error_tuple(Source, [], [], OptsU)
     end.
 
-needs_compile(Source, Target, DtlOpts) ->
+needs_compile(Source, Target) ->
     LM = filelib:last_modified(Target),
     LM < filelib:last_modified(Source).

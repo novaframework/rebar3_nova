@@ -1,7 +1,6 @@
 {description, "Basic Nova project"}.
 {variables, [
-    {name, "project", "Name of the project"},
-    {use_bossdb, "", "Set to 1 to enable bossdb"}
+    {name, "project", "Name of the project"}
 ]}.
 
 {dir, "{{name}}"}.
@@ -10,6 +9,7 @@
 {dir, "{{name}}/config"}.
 {dir, "{{name}}/src/controllers"}.
 {dir, "{{name}}/src/views"}.
+{dir, "{{name}}/src/models"}.
 
 {template, "nova/dev_sys.config.src", "{{name}}/config/dev_sys.config.src"}.
 {template, "nova/prod_sys.config.src", "{{name}}/config/prod_sys.config.src"}.
@@ -18,6 +18,9 @@
 {template, "nova/sup.erl", "{{name}}/src/{{name}}_sup.erl"}.
 {template, "nova/router.erl", "{{name}}/src/{{name}}_router.erl"}.
 {template, "nova/controller.erl", "{{name}}/src/controllers/{{name}}_main_controller.erl"}.
+{template, "nova/model.erl", "{{name}}/src/models/{{name}}_model.erl"}.
+
+
 {template, "nova/rebar.config", "{{name}}/rebar.config"}.
 {template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
 
