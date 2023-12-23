@@ -61,7 +61,6 @@ default(app) -> undefined;
 default(model_dir) -> "src/models";
 default(source_ext) -> ".erl";
 default(module_ext) -> ".beam";
-default(out_dir) -> "ebin";
 default(compiler_options) -> [verbose, return_errors];
 default(recursive) -> true.
 
@@ -76,11 +75,9 @@ compile_models(Source, Target, OutDir, ModelOpts, Opts) ->
 
 do_compile(Source, Target, OutDir, ModelOpts, Opts) ->
     CompilerOptions = option(compiler_options, ModelOpts),
-    LocalOutDir = option(out_dir, ModelOpts),
-    OutDir0 = filename:join([OutDir, LocalOutDir]),
     Sorted = proplists:unfold(
                lists:sort(
-                 [{out_dir, OutDir0},
+                 [{out_dir, OutDir},
                   {model_dir, option(model_dir, ModelOpts)},
                   {compiler_options, CompilerOptions}])),
 
