@@ -8,7 +8,7 @@ init(State) ->
     case parse_version(Vsn) of
         [Major, Minor, _Patch] when Major >= "3" andalso
                                    Minor > "15" ->
-            lists:foldl(fun provider_init/2, {ok, State}, [rebar3_nova_prv, rebar3_nova_serve, rebar3_nova_routes]);
+            lists:foldl(fun provider_init/2, {ok, State}, [rebar3_nova_prv, rebar3_nova_serve, rebar3_nova_routes, rebar3_nova_compilation]);
         _ ->
             rebar_api:abort("Nova needs Rebar > 3.15 to function. Your version is: ~p. Please consider upgrading.", [Vsn])
     end.
