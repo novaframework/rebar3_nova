@@ -1,0 +1,6 @@
+{description, "Template for nova oidcc auth"}.
+{variables, [
+             {name, "appname", "App name"}
+            ]}.
+
+{template, "nova/oidcc_auth.erl", "src/{{name}}.erl"}.
