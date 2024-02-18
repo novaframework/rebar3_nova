@@ -22,3 +22,4 @@
 
 {file, "nova/favicon.ico", "{{name}}/priv/assets/favicon.ico"}.
 {file, "nova/controller.dtl", "{{name}}/src/views/{{name}}_main.dtl"}.
+{file, "nova/.tool-versions", "{{name}}/.tool-versions"}.
