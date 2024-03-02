@@ -11,7 +11,6 @@
 
 {template, "nova/dev_sys.config.src", "{{name}}/config/sys.config.src"}.
 {template, "nova/prod_sys.config.src", "{{name}}/config/prod_sys.config.src"}.
-{template, "nova_lfe/routes.lfe", "{{name}}/src/{{name}}_routing.lfe"}.
 {template, "nova/app.src", "{{name}}/src/{{name}}.app.src"}.
 {template, "nova_lfe/app.lfe", "{{name}}/src/app.lfe"}.
 {template, "nova_lfe/sup.lfe", "{{name}}/src/sup.lfe"}.
