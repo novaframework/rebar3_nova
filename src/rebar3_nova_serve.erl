@@ -70,8 +70,8 @@ do(State) ->
     State1 = remove_from_plugin_paths(State),
     rebar_prv_shell:do(State1).
 
--define(VALID_EXTENSIONS,[<<".erl">>,
-                          <<".dtl">>]).
+-define(VALID_EXTENSIONS,[<<"^(.*)?\.erl$">>,
+                          <<"^(.*)?\.dtl$">>]).
 
 auto() ->
     receive
@@ -79,8 +79,7 @@ auto() ->
             Ext = filename:extension(unicode:characters_to_binary(ChangedFile)),
             IsValid = lists:any(
                         fun(ValidExt) ->
-                                RE = <<ValidExt/binary, "(.+)?">>,
-                                Result = re:run(Ext, RE),
+                                Result = re:run(Ext, ValidExt),
                                 case Result of
                                     {match, _Captured} -> true;
                                     match -> true;
