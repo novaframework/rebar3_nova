@@ -1,6 +1,13 @@
 %% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
 
 [
+ {{{name}}, [
+         {{#use_bossdb}}
+         {database_configuration, #{
+                                    adapter => mock
+                                   }}
+         {{/use_bossdb}}
+            ]},
  {kernel, [
            {logger_level, debug},
            #{formatter => {flatlog, #{
