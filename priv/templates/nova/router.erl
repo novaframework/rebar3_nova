@@ -10,7 +10,7 @@ routes(_Environment) ->
     [#{prefix => "",
       security => false,
       routes => [
-                 {"/", { {{name}}_main_controller, index}, #{methods => [get]}},
-                 {"/assets/[...]", "assets"}
+                 {"/", fun {{name}}_main_controller:index/1 , #{methods => [get]}},
+                 {"/heartbeat", fun(_) -> {status, 200} end, #{methods => [get]}
                 ]
       }].
