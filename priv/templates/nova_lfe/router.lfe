@@ -7,5 +7,6 @@
    '(#M(prefix ""
          security false
          routes
-           (#("/" #({{name}}_main_controller index) #M(methods (get))))
+           (#("/hearbeat" funcall (lambda (_)  (tuple 'status' 200)), #M(methods (get))),
+            #("/" funcall #'{{name}}_main_controller:index/1' #M(methods (get))))
            )))
