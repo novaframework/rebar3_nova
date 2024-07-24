@@ -2,7 +2,7 @@
 
 -export([init/1, do/1, format_error/1]).
 
--include("nova_router.hrl").
+-include_lib("nova/include/nova_router.hrl").
 -include_lib("routing_tree/include/routing_tree.hrl").
 
 -define(PROVIDER, routes).
