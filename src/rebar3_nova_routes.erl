@@ -90,27 +90,20 @@ format_tree([#node{segment = Segment, value = Value, children = Children}|Tl], D
     Prefix = [ $  || _X <- lists:seq(0, Depth*4) ],
 
     lists:foreach(fun(#node_comp{comparator = Method, value = Value0}) ->
-                              Value1 =  case Value0 of
-                                            #nova_handler_value{app=App0, module=undefined, function = undefined, callback = Callback0} -> {App0, Callback0};
+                         {App, Mod, Func} =  case Value0 of
+                                            #nova_handler_value{app=App0, module=undefined, function = undefined, callback = Callback0} -> 
+                                                Module = lists:keyfind(module, 1, erlang:fun_info(Callback0)),
+                                                Function = lists:keyfind(name, 1, erlang:fun_info(Callback0)),
+                                                {App0, Module, Function};
                                             #nova_handler_value{app = App0, module = Mod0, function = Func0} -> {App0, Mod0, Func0};
                                             #cowboy_handler_value{app = App0, handler = Handler} -> {App0, Handler, init}
                                         end,
                           case Tl of
                               [] ->
-                                 case Value1 of
-                                    {App, Mod, Func} ->
-                                        io:format("~ts~ts ~ts /~ts (~ts, ~ts:~ts/1)~n", [Prefix, <<226,148,148,226,148,128,32>>, Method, Segment0, App, Mod, Func]);
-                                    {App, Callback} ->
-                                        io:format("~ts~ts ~ts /~ts (~ts, ~ts)~n", [Prefix, <<226,148,148,226,148,128,32>>, Method, Segment0, App, Callback])
-                                 end;
+                                    io:format("~ts~ts ~ts /~ts (~ts, ~ts:~ts/1)~n", [Prefix, <<226,148,148,226,148,128,32>>, Method, Segment0, App, Mod, Func]);
                               _ ->
-                                case Value1 of
-                                {App, Mod, Func} ->
-                                    io:format("~ts~ts ~ts /~ts (~ts, ~ts:~ts/1)~n", [Prefix, <<226,148,156,226,148,128,32>>, Method, Segment0, App, Mod, Func]);
-                                {App, Callback} ->
-                                    io:format("~ts~ts ~ts /~ts (~ts, ~ts)~n", [Prefix, <<226,148,156,226,148,128,32>>, Method, Segment0, App, Callback])
+                                    io:format("~ts~ts ~ts /~ts (~ts, ~ts:~ts/1)~n", [Prefix, <<226,148,156,226,148,128,32>>, Method, Segment0, App, Mod, Func])
                               end
-                            end
-                  end, Value),
+                          end, Value),
     format_tree(Children, Depth+1),
     format_tree(Tl, Depth).
