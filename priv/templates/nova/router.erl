@@ -11,6 +11,6 @@ routes(_Environment) ->
       security => false,
       routes => [
                  {"/", fun {{name}}_main_controller:index/1 , #{methods => [get]}},
-                 {"/heartbeat", fun(_) -> {status, 200} end, #{methods => [get]}
+                 {"/heartbeat", fun(_) -> {status, 200} end, #{methods => [get]}}
                 ]
       }].
