@@ -2,7 +2,7 @@
 
 -export([init/1, do/1, format_error/1]).
 
--include_lib("nova/include/nova_router.hrl").
+-include("nova_router.hrl").
 -include_lib("routing_tree/include/routing_tree.hrl").
 
 -define(PROVIDER, routes).
@@ -91,7 +91,7 @@ format_tree([#node{segment = Segment, value = Value, children = Children}|Tl], D
 
     lists:foreach(fun(#node_comp{comparator = Method, value = Value0}) ->
                          {App, Mod, Func} =  case Value0 of
-                                            #nova_handler_value{app=App0, module=undefined, function = undefined, callback = Callback0} -> 
+                                            #nova_handler_value{app=App0, module=undefined, function = undefined, callback = Callback0} ->
                                                 {module, Module} = lists:keyfind(module, 1, erlang:fun_info(Callback0)),
                                                 {name, Function} = lists:keyfind(name, 1, erlang:fun_info(Callback0)),
                                                 {App0, Module, Function};
