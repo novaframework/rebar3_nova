@@ -9,7 +9,7 @@
          routes
            (
             #("/hearbeat" ,(lambda (_) #(status 200)) #M(methods (get)))
-            #("/" ,(lambda (params) (novatrial_main_controller:index params))
+            #("/" ,(lambda (params) ({{name}}_main_controller:index params))
               #M(methods (get)))
             )
            )))
