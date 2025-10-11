@@ -4,9 +4,12 @@
 
 (defun routes
   (_)
-   '(#M(prefix ""
+   `(#M(prefix ""
          security false
          routes
-           (#("/hearbeat" funcall (lambda (_)  (tuple 'status' 200)), #M(methods (get))),
-            #("/" funcall #'{{name}}_main_controller:index/1' #M(methods (get))))
+           (
+            #("/hearbeat" ,(lambda (_) #(status 200)) #M(methods (get)))
+            #("/" ,(lambda (params) (novatrial_main_controller:index params))
+              #M(methods (get)))
+            )
            )))

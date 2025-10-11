@@ -1,12 +1,23 @@
 %% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
 
 [
- {kernel, [
-           {logger_level, debug},
-           {logger,
-            [{handler, default, logger_std_h,
-              #{ formatter => {logger_formatter, #{ }}}}]}
-          ]},
+  {kernel, [
+      {logger, [
+          {handler, default, logger_std_h,
+          #{level => info,
+            formatter => {logjam,
+              #{colored => true,
+                time_designator => $\s,
+                time_offset => "",
+                time_unit => second,
+                strip_tz => true,
+                level_capitalize => true
+              }
+            }
+           }
+          }
+      ]}
+  ]},
  {nova, [
          {environment, dev},
          {cowboy_configuration, #{

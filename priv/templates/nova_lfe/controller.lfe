@@ -7,4 +7,4 @@
   ;; GET Handler
   ;;
   (_)
-    `#(ok (#(message "nova is running!"))))
+    `#(status 200 #M() "nova is running!"))
