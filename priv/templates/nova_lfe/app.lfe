@@ -5,6 +5,8 @@
     (start 2)
     (stop 0)))
 
+(include-lib "logjam/include/logjam.hrl")
+
 ;;; --------------------------
 ;;; application implementation
 ;;; --------------------------

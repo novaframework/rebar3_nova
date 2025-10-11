@@ -9,7 +9,7 @@
 {dir, "{{name}}/src/controllers"}.
 {dir, "{{name}}/src/views"}.
 
-{template, "nova/dev_sys.config.src", "{{name}}/config/sys.config.src"}.
+{template, "nova_lfe/dev_sys.config.src", "{{name}}/config/dev_sys.config.src"}.
 {template, "nova/prod_sys.config.src", "{{name}}/config/prod_sys.config.src"}.
 {template, "nova/app.src", "{{name}}/src/{{name}}.app.src"}.
 {template, "nova_lfe/app.lfe", "{{name}}/src/app.lfe"}.
