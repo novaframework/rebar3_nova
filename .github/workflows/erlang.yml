@@ -1,0 +1,35 @@
+name: Build and test
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    name: OTP ${{matrix.otp}} / rebar3 ${{matrix.rebar3}}
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ['28.0']
+        rebar3: ['3.26.0']
+    steps:
+    - uses: actions/checkout@v4
+    - uses: erlef/setup-beam@v1
+      with:
+        otp-version: ${{matrix.otp}}
+        rebar3-version: ${{matrix.rebar3}}
+        version-type: strict
+    - name: Cache rebar3 deps and build
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/rebar3
+          _build
+        key: ${{runner.os}}-rebar3-${{matrix.otp}}-${{matrix.rebar3}}-${{hashFiles('rebar.lock')}}
+        restore-keys: |
+          ${{runner.os}}-rebar3-${{matrix.otp}}-${{matrix.rebar3}}-
+    - name: Compile
+      run: rebar3 compile
+    - name: Run dialyzer
+      run: rebar3 dialyzer
+    - name: Run xref
+      run: rebar3 xref
