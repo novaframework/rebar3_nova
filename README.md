@@ -69,22 +69,6 @@ Generated functions return stub responses:
 
 If the file already exists, the command skips it with a warning.
 
-### `nova gen_router` — Generate a router module
-
-Scaffolds a router module implementing the `nova_router` behaviour with an empty routes list.
-
-```
-$ rebar3 nova gen_router --name api_v1 --prefix /api/v1
-===> Created src/myapp_api_v1_router.erl
-```
-
-**Options:**
-
-| Flag | Required | Default | Description |
-|------|----------|---------|-------------|
-| `--name`, `-n` | yes | — | Router name |
-| `--prefix`, `-p` | no | `""` | URL prefix for routes |
-
 ### `nova gen_resource` — Generate a full resource
 
 Combines controller generation, JSON schema creation, and prints route snippets to add to your router.
