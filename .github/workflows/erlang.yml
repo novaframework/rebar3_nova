@@ -5,7 +5,6 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-24.04
-    name: OTP ${{matrix.otp}} / rebar3 ${{matrix.rebar3}}
     strategy:
       fail-fast: false
       matrix:
