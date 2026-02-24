@@ -10,16 +10,16 @@ init(State) ->
                                    Minor > "15" ->
             lists:foldl(fun provider_init/2, {ok, State},
                         [rebar3_nova_prv, rebar3_nova_serve, rebar3_nova_routes, rebar3_nova_openapi,
-                         rebar3_nova_gen_controller, rebar3_nova_gen_router, rebar3_nova_gen_resource,
-                         rebar3_nova_gen_test, rebar3_nova_middleware, rebar3_nova_config,
-                         rebar3_nova_audit, rebar3_nova_release]);
+                         rebar3_nova_gen_controller, rebar3_nova_gen_resource,
+                         rebar3_nova_gen_test, rebar3_nova_gen_auth, rebar3_nova_middleware,
+                         rebar3_nova_config, rebar3_nova_audit, rebar3_nova_release]);
         ["git"] ->
             rebar_api:info("Compiling with rebar3 from git - make sure you know what you are doing"),
             lists:foldl(fun provider_init/2, {ok, State},
                         [rebar3_nova_prv, rebar3_nova_serve, rebar3_nova_routes, rebar3_nova_openapi,
-                         rebar3_nova_gen_controller, rebar3_nova_gen_router, rebar3_nova_gen_resource,
-                         rebar3_nova_gen_test, rebar3_nova_middleware, rebar3_nova_config,
-                         rebar3_nova_audit, rebar3_nova_release]);
+                         rebar3_nova_gen_controller, rebar3_nova_gen_resource,
+                         rebar3_nova_gen_test, rebar3_nova_gen_auth, rebar3_nova_middleware,
+                         rebar3_nova_config, rebar3_nova_audit, rebar3_nova_release]);
         SomethingElse ->
             rebar_api:abort("Nova needs Rebar > 3.15 to function. Your version is: ~p. Please consider upgrading.", [SomethingElse])
     end.

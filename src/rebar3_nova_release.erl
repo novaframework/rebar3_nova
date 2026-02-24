@@ -31,9 +31,7 @@ do(State) ->
     SchemaDir = filename:join([AppDir, "priv", "schemas"]),
     case filelib:is_dir(SchemaDir) of
         true ->
-            OutputPath = filename:join([AppDir, "priv", "assets", "openapi.json"]),
-            rebar3_nova_utils:ensure_dir(OutputPath),
-            rebar_api:info("Regenerating OpenAPI spec to ~s", [OutputPath]),
+            rebar_api:info("Regenerating OpenAPI spec", []),
             rebar3_nova_openapi:do(State);
         false ->
             ok

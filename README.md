@@ -69,22 +69,6 @@ Generated functions return stub responses:
 
 If the file already exists, the command skips it with a warning.
 
-### `nova gen_router` — Generate a router module
-
-Scaffolds a router module implementing the `nova_router` behaviour with an empty routes list.
-
-```
-$ rebar3 nova gen_router --name api_v1 --prefix /api/v1
-===> Created src/myapp_api_v1_router.erl
-```
-
-**Options:**
-
-| Flag | Required | Default | Description |
-|------|----------|---------|-------------|
-| `--name`, `-n` | yes | — | Router name |
-| `--prefix`, `-p` | no | `""` | URL prefix for routes |
-
 ### `nova gen_resource` — Generate a full resource
 
 Combines controller generation, JSON schema creation, and prints route snippets to add to your router.
@@ -129,21 +113,22 @@ Generates an OpenAPI 3.0.3 JSON specification from compiled routes and any JSON 
 
 ```
 $ rebar3 nova openapi
-===> OpenAPI spec written to openapi.json
-===> Swagger UI written to swagger.html
+===> OpenAPI spec written to /path/to/myapp/priv/assets/openapi.json
+===> Swagger UI written to /path/to/myapp/priv/assets/swagger.html
 
-$ rebar3 nova openapi --output priv/assets/openapi.json --title "My API" --api-version 1.0.0
+$ rebar3 nova openapi --title "My API" --api-version 1.0.0
+$ rebar3 nova openapi --output custom/path/openapi.json
 ```
 
 **Options:**
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
-| `--output`, `-o` | no | `openapi.json` | Output file path |
+| `--output`, `-o` | no | `priv/assets/openapi.json` | Output file path |
 | `--title`, `-t` | no | app name | API title |
 | `--api-version`, `-v` | no | `0.1.0` | API version string |
 
-A `swagger.html` file is also generated alongside the spec for quick browser-based exploration.
+A `swagger.html` file is also generated alongside the spec for quick browser-based exploration. The output directory is created automatically if it doesn't exist.
 
 ### `nova middleware` — Show plugin/middleware chains
 
