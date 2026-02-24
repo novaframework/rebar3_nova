@@ -21,7 +21,7 @@ init(State) ->
             {deps, ?DEPS},
             {example, "rebar3 nova openapi"},
             {opts, [
-                {output, $o, "output", {string, "openapi.json"}, "Output file path"},
+                {output, $o, "output", string, "Output file path (default: priv/assets/openapi.json)"},
                 {title, $t, "title", string, "API title (default: app name)"},
                 {api_version, $v, "api-version", {string, "0.1.0"}, "API version"}
             ]},
@@ -37,7 +37,10 @@ do(State) ->
     AppDir = rebar_app_info:dir(Hd),
 
     {Args, _} = rebar_state:command_parsed_args(State),
-    Output = proplists:get_value(output, Args, "openapi.json"),
+    Output = case proplists:get_value(output, Args) of
+                 undefined -> filename:join([AppDir, "priv", "assets", "openapi.json"]);
+                 O -> O
+             end,
     Title = case proplists:get_value(title, Args) of
                 undefined -> erlang:atom_to_list(AppName);
                 T -> T
@@ -52,6 +55,7 @@ do(State) ->
     Spec = build_spec(Title, ApiVersion, Routes, Schemas),
     Json = thoas:encode(Spec),
 
+    ok = filelib:ensure_dir(Output),
     ok = file:write_file(Output, Json),
     rebar_api:info("OpenAPI spec written to ~s", [Output]),
 
@@ -224,7 +228,7 @@ swagger_html(SpecPath) ->
      "  <script src=\"https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js\"></script>\n"
      "  <script>\n"
      "    SwaggerUIBundle({\n"
-     "      url: '/", SpecFile, "',\n"
+     "      url: '", SpecFile, "',\n"
      "      dom_id: '#swagger-ui',\n"
      "      presets: [SwaggerUIBundle.presets.apis],\n"
      "      layout: 'BaseLayout'\n"
