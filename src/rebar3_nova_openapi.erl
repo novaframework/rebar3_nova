@@ -102,21 +102,23 @@ classify_handler(#node_comp{value = #nova_handler_value{module = nova_file_contr
 classify_handler(#node_comp{value = #nova_handler_value{module = nova_error_controller}}, _Path) ->
     false;
 classify_handler(#node_comp{comparator = Method,
-                            value = #nova_handler_value{module = undefined, function = undefined, callback = Callback}}, Path) ->
+                            value = #nova_handler_value{module = undefined, function = undefined,
+                                                        callback = Callback, extra_state = Extra}}, Path) ->
     {module, Module} = lists:keyfind(module, 1, erlang:fun_info(Callback)),
     {name, Function} = lists:keyfind(name, 1, erlang:fun_info(Callback)),
-    expand_methods(Method, Path, Module, Function);
+    expand_methods(Method, Path, Module, Function, Extra);
 classify_handler(#node_comp{comparator = Method,
-                            value = #nova_handler_value{module = Module, function = Function}}, Path) ->
-    expand_methods(Method, Path, Module, Function);
+                            value = #nova_handler_value{module = Module, function = Function,
+                                                        extra_state = Extra}}, Path) ->
+    expand_methods(Method, Path, Module, Function, Extra);
 classify_handler(#node_comp{value = #cowboy_handler_value{}}, _Path) ->
     false.
 
-expand_methods('_', Path, Module, Function) ->
+expand_methods('_', Path, Module, Function, Extra) ->
     Methods = [<<"get">>, <<"post">>, <<"put">>, <<"delete">>, <<"patch">>],
-    {true, [{Path, M, Module, Function} || M <- Methods]};
-expand_methods(Method, Path, Module, Function) ->
-    {true, [{Path, method_to_binary(Method), Module, Function}]}.
+    {true, [{Path, M, Module, Function, Extra} || M <- Methods]};
+expand_methods(Method, Path, Module, Function, Extra) ->
+    {true, [{Path, method_to_binary(Method), Module, Function, Extra}]}.
 
 method_to_binary(Method) when is_atom(Method) ->
     erlang:atom_to_binary(Method);
@@ -170,29 +172,58 @@ build_spec(Title, Version, Routes, Schemas) ->
     end.
 
 build_paths(Routes) ->
-    %% Routes is a list of [{Path, Method, Module, Function}] (some entries are nested lists from wildcard expansion)
     FlatRoutes = lists:flatten(Routes),
-    %% Group by path
-    Grouped = lists:foldl(fun({Path, Method, Module, Function}, Acc) ->
+    Grouped = lists:foldl(fun({Path, Method, Module, Function, Extra}, Acc) ->
         PathMethods = maps:get(Path, Acc, #{}),
         OpId = <<(erlang:atom_to_binary(Module))/binary, ".", (erlang:atom_to_binary(Function))/binary>>,
         Params = extract_path_params(Path),
-        Operation = case Params of
-            [] ->
-                #{
-                    <<"operationId">> => OpId,
-                    <<"responses">> => #{<<"200">> => #{<<"description">> => <<"Successful response">>}}
-                };
-            _ ->
-                #{
-                    <<"operationId">> => OpId,
-                    <<"parameters">> => Params,
-                    <<"responses">> => #{<<"200">> => #{<<"description">> => <<"Successful response">>}}
-                }
+        SchemaRef = schema_ref(Extra),
+        Operation0 = #{<<"operationId">> => OpId},
+        Operation1 = case Params of
+            [] -> Operation0;
+            _ -> Operation0#{<<"parameters">> => Params}
         end,
-        Acc#{Path => PathMethods#{Method => Operation}}
+        Operation2 = maybe_add_request_body(Method, SchemaRef, Operation1),
+        Operation3 = maybe_add_response_schema(Method, SchemaRef, Operation2),
+        Acc#{Path => PathMethods#{Method => Operation3}}
     end, #{}, FlatRoutes),
     Grouped.
+
+schema_ref(#{json_schema := SchemaPath}) ->
+    Basename = filename:basename(SchemaPath, ".json"),
+    Name = unicode:characters_to_binary(Basename),
+    {ok, <<"#/components/schemas/", Name/binary>>};
+schema_ref(_) ->
+    none.
+
+maybe_add_request_body(Method, {ok, Ref}, Operation)
+  when Method =:= <<"post">>; Method =:= <<"put">>; Method =:= <<"patch">> ->
+    Operation#{<<"requestBody">> => #{
+        <<"required">> => true,
+        <<"content">> => #{
+            <<"application/json">> => #{
+                <<"schema">> => #{<<"$ref">> => Ref}
+            }
+        }
+    }};
+maybe_add_request_body(_Method, _SchemaRef, Operation) ->
+    Operation.
+
+maybe_add_response_schema(_Method, {ok, Ref}, Operation) ->
+    Operation#{<<"responses">> => #{
+        <<"200">> => #{
+            <<"description">> => <<"Successful response">>,
+            <<"content">> => #{
+                <<"application/json">> => #{
+                    <<"schema">> => #{<<"$ref">> => Ref}
+                }
+            }
+        }
+    }};
+maybe_add_response_schema(_Method, none, Operation) ->
+    Operation#{<<"responses">> => #{
+        <<"200">> => #{<<"description">> => <<"Successful response">>}
+    }}.
 
 extract_path_params(Path) ->
     Segments = binary:split(Path, <<"/">>, [global]),
