@@ -1,0 +1,10 @@
+_build
+.rebar3
+.rebar
+.git
+log
+logs
+erl_crash.dump
+rebar3.crashdump
+*.beam
+*.o

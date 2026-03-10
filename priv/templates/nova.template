@@ -24,3 +24,5 @@
 {file, "nova/controller.dtl", "{{name}}/src/views/{{name}}_main.dtl"}.
 {file, "nova/.tool-versions", "{{name}}/.tool-versions"}.
 {file, "nova/.gitignore", "{{name}}/.gitignore"}.
+{template, "nova/Dockerfile", "{{name}}/Dockerfile"}.
+{file, "nova/.dockerignore", "{{name}}/.dockerignore"}.

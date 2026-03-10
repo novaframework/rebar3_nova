@@ -1,6 +1,7 @@
--sname '{{name}}'
-
--setcookie {{name}}_cookie
+## Distributed Erlang is disabled by default.
+## Uncomment the lines below if you need distribution.
+## -sname '{{name}}'
+## -setcookie {{name}}_cookie
 
 +K true
 +A30

@@ -5,11 +5,12 @@
            {logger_level, info},
            {logger,
             [{handler, default, logger_std_h,
-              #{level => error,
-                config => #{file => "log/erlang.log"}}}
+              #{formatter => {nova_jsonlogger, #{new_line => true}}}}
             ]}
           ]},
  {nova, [
+         {shutdown_delay, 5000},
+         {shutdown_drain_timeout, 15000},
          {use_stacktrace, false},
          {environment, prod},
          {cowboy_configuration, #{
