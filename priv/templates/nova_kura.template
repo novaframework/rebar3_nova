@@ -1,0 +1,33 @@
+{description, "Nova project with Kura (PostgreSQL ORM)"}.
+{variables, [
+    {name, "project", "Name of the project"}
+]}.
+
+{dir, "{{name}}"}.
+{dir, "{{name}}/priv"}.
+{dir, "{{name}}/priv/assets"}.
+{dir, "{{name}}/config"}.
+{dir, "{{name}}/src/controllers"}.
+{dir, "{{name}}/src/views"}.
+{dir, "{{name}}/src/schemas"}.
+{dir, "{{name}}/src/migrations"}.
+
+{template, "nova_kura/dev_sys.config.src", "{{name}}/config/dev_sys.config.src"}.
+{template, "nova_kura/prod_sys.config.src", "{{name}}/config/prod_sys.config.src"}.
+{template, "nova_kura/app.src", "{{name}}/src/{{name}}.app.src"}.
+{template, "nova_kura/app.erl", "{{name}}/src/{{name}}_app.erl"}.
+{template, "nova_kura/sup.erl", "{{name}}/src/{{name}}_sup.erl"}.
+{template, "nova_kura/repo.erl", "{{name}}/src/{{name}}_repo.erl"}.
+{template, "nova/router.erl", "{{name}}/src/{{name}}_router.erl"}.
+{template, "nova/controller.erl", "{{name}}/src/controllers/{{name}}_main_controller.erl"}.
+{template, "nova/health_controller.erl", "{{name}}/src/controllers/{{name}}_health_controller.erl"}.
+{template, "nova_kura/rebar.config", "{{name}}/rebar.config"}.
+{template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
+
+{file, "nova/favicon.ico", "{{name}}/priv/assets/favicon.ico"}.
+{file, "nova/controller.dtl", "{{name}}/src/views/{{name}}_main.dtl"}.
+{file, "nova/.tool-versions", "{{name}}/.tool-versions"}.
+{file, "nova/.gitignore", "{{name}}/.gitignore"}.
+{template, "nova/Dockerfile", "{{name}}/Dockerfile"}.
+{file, "nova/.dockerignore", "{{name}}/.dockerignore"}.
+{template, "nova/fly.toml", "{{name}}/fly.toml"}.

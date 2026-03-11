@@ -1,0 +1,37 @@
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+
+[
+ {kernel, [
+           {logger_level, info},
+           {logger,
+            [{handler, default, logger_std_h,
+              #{formatter => {nova_jsonlogger, #{new_line => true}}}}
+            ]}
+          ]},
+ {nova, [
+         {shutdown_delay, 5000},
+         {shutdown_drain_timeout, 15000},
+         {use_stacktrace, false},
+         {environment, prod},
+         {cowboy_configuration, #{
+                                  port => 8080
+                                 }},
+         {dev_mode, false},
+         {bootstrap_application, {{name}}},
+         {plugins, [
+                    {pre_request, nova_request_plugin, #{decode_json_body => true}}
+                   ]}
+        ]},
+ {{{name}}, [
+         {{{name}}_repo, #{
+             database => <<"{{name}}_prod">>,
+             hostname => <<"localhost">>,
+             port => 5432,
+             username => <<"postgres">>,
+             password => <<"postgres">>,
+             pool_size => 20
+         }}
+        ]}
+  %% In production, set DATABASE_URL environment variable instead.
+  %% The repo init/1 callback will parse it automatically.
+].

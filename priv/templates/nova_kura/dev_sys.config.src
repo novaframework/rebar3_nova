@@ -1,0 +1,36 @@
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+
+[
+ {kernel, [
+           {logger_level, debug},
+           #{formatter => {flatlog, #{
+                                      map_depth => 3,
+                                      term_depth => 50,
+                                      colored => true,
+                                      template => [colored_start, "[\033[1m", level, "\033[0m", colored_start,"] [", time, "]",
+                                                   colored_end, " ", msg, " (", mfa, ")\n"]
+                                     }}}
+          ]},
+ {nova, [
+         {use_stacktrace, true},
+         {environment, dev},
+         {cowboy_configuration, #{
+                                  port => 8080
+                                 }},
+         {dev_mode, true},
+         {bootstrap_application, {{name}}},
+         {plugins, [
+                    {pre_request, nova_request_plugin, #{decode_json_body => true}}
+                   ]}
+        ]},
+ {{{name}}, [
+         {{{name}}_repo, #{
+             database => <<"{{name}}_dev">>,
+             hostname => <<"localhost">>,
+             port => 5432,
+             username => <<"postgres">>,
+             password => <<"postgres">>,
+             pool_size => 10
+         }}
+        ]}
+].
