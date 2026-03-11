@@ -17,6 +17,7 @@
 {template, "nova/sup.erl", "{{name}}/src/{{name}}_sup.erl"}.
 {template, "nova/router.erl", "{{name}}/src/{{name}}_router.erl"}.
 {template, "nova/controller.erl", "{{name}}/src/controllers/{{name}}_main_controller.erl"}.
+{template, "nova/health_controller.erl", "{{name}}/src/controllers/{{name}}_health_controller.erl"}.
 {template, "nova/rebar.config", "{{name}}/rebar.config"}.
 {template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
 
@@ -26,3 +27,4 @@
 {file, "nova/.gitignore", "{{name}}/.gitignore"}.
 {template, "nova/Dockerfile", "{{name}}/Dockerfile"}.
 {file, "nova/.dockerignore", "{{name}}/.dockerignore"}.
+{template, "nova/fly.toml", "{{name}}/fly.toml"}.
