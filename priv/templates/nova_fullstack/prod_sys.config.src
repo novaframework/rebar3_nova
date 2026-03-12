@@ -21,11 +21,10 @@
                     {pre_request, nova_request_plugin, #{decode_json_body => true}}
                    ]}
         ]},
- {arizona, #{
-     server => #{enabled => false},
-     reloader => #{enabled => false},
-     pubsub_scope => nova_scope
- }},
+ {arizona_nova, [
+     {pubsub_scope, nova_scope},
+     {live_reload, false}
+ ]},
  {{{name}}, [
      {{{name}}_repo, #{
          pool_size => 20,

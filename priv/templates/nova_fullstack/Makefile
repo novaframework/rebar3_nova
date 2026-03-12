@@ -8,7 +8,7 @@ compile:
 
 assets:
 	@mkdir -p priv/static/assets/js
-	@cp _build/default/lib/arizona/priv/static/assets/js/*.min.js priv/static/assets/js/ 2>/dev/null || true
+	@cp _build/default/lib/arizona_core/priv/static/assets/js/*.min.js priv/static/assets/js/ 2>/dev/null || true
 
 serve: compile
 	@rebar3 nova serve

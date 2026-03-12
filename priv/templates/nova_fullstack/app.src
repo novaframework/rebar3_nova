@@ -10,7 +10,7 @@
         stdlib,
         nova,
         kura,
-        arizona
+        arizona_nova
     ]},
     {env, []},
     {modules, []},
