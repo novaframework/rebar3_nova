@@ -25,7 +25,8 @@
         ]},
  {arizona, #{
      server => #{enabled => false},
-     reloader => #{enabled => true}
+     reloader => #{enabled => true},
+     pubsub_scope => nova_scope
  }},
  {{{name}}, [
      {{{name}}_repo, #{
