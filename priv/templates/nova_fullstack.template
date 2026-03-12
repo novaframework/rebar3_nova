@@ -17,18 +17,18 @@
 
 {template, "nova_fullstack/rebar.config", "{{name}}/rebar.config"}.
 {template, "nova_fullstack/app.src", "{{name}}/src/{{name}}.app.src"}.
-{template, "nova_fullstack/app.erl", "{{name}}/src/{{name}}_app.erl"}.
-{template, "nova_fullstack/sup.erl", "{{name}}/src/{{name}}_sup.erl"}.
+{template, "nova/app.erl", "{{name}}/src/{{name}}_app.erl"}.
+{template, "nova/sup.erl", "{{name}}/src/{{name}}_sup.erl"}.
 {template, "nova_fullstack/router.erl", "{{name}}/src/{{name}}_router.erl"}.
 {template, "nova_fullstack/home_view.erl", "{{name}}/src/views/{{name}}_home_view.erl"}.
 {template, "nova_fullstack/repo.erl", "{{name}}/src/{{name}}_repo.erl"}.
 {template, "nova_fullstack/dev_sys.config.src", "{{name}}/config/dev_sys.config.src"}.
 {template, "nova_fullstack/prod_sys.config.src", "{{name}}/config/prod_sys.config.src"}.
-{template, "nova_fullstack/vm.args.src", "{{name}}/config/vm.args.src"}.
+{template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
 {template, "nova_fullstack/docker-compose.yml", "{{name}}/docker-compose.yml"}.
 
 {file, "nova_fullstack/Makefile", "{{name}}/Makefile"}.
 {file, "nova/favicon.ico", "{{name}}/priv/static/assets/favicon.ico"}.
 {file, "nova_fullstack/app.css", "{{name}}/priv/static/assets/css/app.css"}.
-{file, "nova_fullstack/.tool-versions", "{{name}}/.tool-versions"}.
+{file, "nova/.tool-versions", "{{name}}/.tool-versions"}.
 {file, "nova_fullstack/.gitignore", "{{name}}/.gitignore"}.
