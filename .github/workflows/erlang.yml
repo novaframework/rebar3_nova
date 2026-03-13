@@ -3,32 +3,10 @@ name: Build and test
 on: [push, pull_request]
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        otp: ['28.0']
-        rebar3: ['3.26.0']
-    steps:
-    - uses: actions/checkout@v4
-    - uses: erlef/setup-beam@v1
-      with:
-        otp-version: ${{matrix.otp}}
-        rebar3-version: ${{matrix.rebar3}}
-        version-type: strict
-    - name: Cache rebar3 deps and build
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/rebar3
-          _build
-        key: ${{runner.os}}-rebar3-${{matrix.otp}}-${{matrix.rebar3}}-${{hashFiles('rebar.lock')}}
-        restore-keys: |
-          ${{runner.os}}-rebar3-${{matrix.otp}}-${{matrix.rebar3}}-
-    - name: Compile
-      run: rebar3 compile
-    - name: Run xref
-      run: rebar3 xref
-    - name: Generate docs
-      run: rebar3 ex_doc
+  ci:
+    uses: Taure/erlang-ci/.github/workflows/ci.yml@v1
+    with:
+      otp-version: '28.0'
+      rebar3-version: '3.26.0'
+      enable-eunit: false
+      enable-ex-doc: true
