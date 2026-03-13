@@ -11,15 +11,15 @@
 -spec init(rebar_state:t()) -> {ok, rebar_state:t()}.
 init(State) ->
     Provider = providers:create([
-            {name, ?PROVIDER},
-            {module, ?MODULE},
-            {namespace, nova},
-            {bare, true},
-            {deps, ?DEPS},
-            {example, "rebar3 nova audit"},
-            {opts, []},
-            {short_desc, "Audit route security configuration"},
-            {desc, "Checks routes for security issues like unsecured mutations and wildcard methods"}
+        {name, ?PROVIDER},
+        {module, ?MODULE},
+        {namespace, nova},
+        {bare, true},
+        {deps, ?DEPS},
+        {example, "rebar3 nova audit"},
+        {opts, []},
+        {short_desc, "Audit route security configuration"},
+        {desc, "Checks routes for security issues like unsecured mutations and wildcard methods"}
     ]),
     {ok, rebar_state:add_provider(State, Provider)}.
 
@@ -34,21 +34,25 @@ do(State) ->
     io:format("~n=== Security Audit ===~n"),
 
     case Warnings of
-        [] -> ok;
+        [] ->
+            ok;
         _ ->
             io:format("~n  WARNINGS:~n"),
             lists:foreach(fun(W) -> io:format("    ~s~n", [W]) end, Warnings)
     end,
 
     case Infos of
-        [] -> ok;
+        [] ->
+            ok;
         _ ->
             io:format("~n  INFO:~n"),
             lists:foreach(fun(I) -> io:format("    ~s~n", [I]) end, Infos)
     end,
 
-    io:format("~n  Summary: ~b warning(s), ~b info(s)~n",
-              [length(Warnings), length(Infos)]),
+    io:format(
+        "~n  Summary: ~b warning(s), ~b info(s)~n",
+        [length(Warnings), length(Infos)]
+    ),
     {ok, State}.
 
 -spec format_error(any()) -> iolist().
@@ -56,28 +60,45 @@ format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
 classify_findings(Routes) ->
-    lists:foldl(fun({Path, Method, Secure, Module, IsWildcard}, {WAcc, IAcc}) ->
-        MethodStr = string:uppercase(erlang:binary_to_list(Method)),
-        W1 = case is_mutation(Method) andalso Secure =:= false of
-            true ->
-                [io_lib:format("~s ~s (~s) has no security", [MethodStr, Path, Module]) | WAcc];
-            false ->
-                WAcc
+    lists:foldl(
+        fun({Path, Method, Secure, Module, IsWildcard}, {WAcc, IAcc}) ->
+            MethodStr = string:uppercase(erlang:binary_to_list(Method)),
+            W1 =
+                case is_mutation(Method) andalso Secure =:= false of
+                    true ->
+                        [
+                            io_lib:format("~s ~s (~s) has no security", [MethodStr, Path, Module])
+                            | WAcc
+                        ];
+                    false ->
+                        WAcc
+                end,
+            W2 =
+                case IsWildcard of
+                    true ->
+                        [
+                            io_lib:format(
+                                "Wildcard method on ~s (~s) - all HTTP methods accepted", [
+                                    Path, Module
+                                ]
+                            )
+                            | W1
+                        ];
+                    false ->
+                        W1
+                end,
+            I1 =
+                case Method =:= <<"get">> andalso Secure =:= false of
+                    true ->
+                        [io_lib:format("GET ~s (~s) has no security", [Path, Module]) | IAcc];
+                    false ->
+                        IAcc
+                end,
+            {W2, I1}
         end,
-        W2 = case IsWildcard of
-            true ->
-                [io_lib:format("Wildcard method on ~s (~s) - all HTTP methods accepted", [Path, Module]) | W1];
-            false ->
-                W1
-        end,
-        I1 = case Method =:= <<"get">> andalso Secure =:= false of
-            true ->
-                [io_lib:format("GET ~s (~s) has no security", [Path, Module]) | IAcc];
-            false ->
-                IAcc
-        end,
-        {W2, I1}
-    end, {[], []}, Routes).
+        {[], []},
+        Routes
+    ).
 
 is_mutation(<<"post">>) -> true;
 is_mutation(<<"put">>) -> true;
@@ -86,19 +107,28 @@ is_mutation(<<"patch">>) -> true;
 is_mutation(_) -> false.
 
 collect_routes(#host_tree{hosts = Hosts}) ->
-    lists:flatmap(fun({_Host, #routing_tree{tree = Tree}}) ->
-        collect_nodes(Tree, <<>>)
-    end, Hosts).
+    lists:flatmap(
+        fun({_Host, #routing_tree{tree = Tree}}) ->
+            collect_nodes(Tree, <<>>)
+        end,
+        Hosts
+    ).
 
-collect_nodes([], _Prefix) -> [];
-collect_nodes([#node{is_wildcard = true}|Tl], Prefix) ->
+collect_nodes([], _Prefix) ->
+    [];
+collect_nodes([#node{is_wildcard = true} | Tl], Prefix) ->
     collect_nodes(Tl, Prefix);
-collect_nodes([#node{segment = Segment}|Tl], Prefix) when is_integer(Segment) ->
+collect_nodes([#node{segment = Segment} | Tl], Prefix) when is_integer(Segment) ->
     collect_nodes(Tl, Prefix);
-collect_nodes([#node{segment = Segment, is_binding = IsBinding, value = Value, children = Children}|Tl], Prefix) ->
+collect_nodes(
+    [#node{segment = Segment, is_binding = IsBinding, value = Value, children = Children} | Tl],
+    Prefix
+) ->
     SegBin = segment_to_binary(Segment, IsBinding),
     NewPrefix = <<Prefix/binary, "/", SegBin/binary>>,
-    HandlerRoutes = lists:filtermap(fun(NodeComp) -> classify_handler(NodeComp, NewPrefix) end, Value),
+    HandlerRoutes = lists:filtermap(
+        fun(NodeComp) -> classify_handler(NodeComp, NewPrefix) end, Value
+    ),
     lists:flatten(HandlerRoutes) ++ collect_nodes(Children, NewPrefix) ++ collect_nodes(Tl, Prefix).
 
 segment_to_binary(Segment, true) when is_binary(Segment) ->
@@ -112,13 +142,27 @@ classify_handler(#node_comp{value = #nova_handler_value{module = nova_file_contr
     false;
 classify_handler(#node_comp{value = #nova_handler_value{module = nova_error_controller}}, _Path) ->
     false;
-classify_handler(#node_comp{comparator = Method,
-                            value = #nova_handler_value{module = undefined, function = undefined,
-                                                        callback = Callback, secure = Secure}}, Path) ->
+classify_handler(
+    #node_comp{
+        comparator = Method,
+        value = #nova_handler_value{
+            module = undefined,
+            function = undefined,
+            callback = Callback,
+            secure = Secure
+        }
+    },
+    Path
+) ->
     {module, Module} = lists:keyfind(module, 1, erlang:fun_info(Callback)),
     expand_methods(Method, Path, Module, Secure);
-classify_handler(#node_comp{comparator = Method,
-                            value = #nova_handler_value{module = Module, secure = Secure}}, Path) ->
+classify_handler(
+    #node_comp{
+        comparator = Method,
+        value = #nova_handler_value{module = Module, secure = Secure}
+    },
+    Path
+) ->
     expand_methods(Method, Path, Module, Secure);
 classify_handler(#node_comp{value = #cowboy_handler_value{}}, _Path) ->
     false.

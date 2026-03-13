@@ -8,15 +8,15 @@
 -spec init(rebar_state:t()) -> {ok, rebar_state:t()}.
 init(State) ->
     Provider = providers:create([
-            {name, ?PROVIDER},
-            {module, ?MODULE},
-            {namespace, nova},
-            {bare, true},
-            {deps, ?DEPS},
-            {example, "rebar3 nova config"},
-            {opts, []},
-            {short_desc, "Show Nova application configuration"},
-            {desc, "Displays all Nova configuration keys with their values or defaults"}
+        {name, ?PROVIDER},
+        {module, ?MODULE},
+        {namespace, nova},
+        {bare, true},
+        {deps, ?DEPS},
+        {example, "rebar3 nova config"},
+        {opts, []},
+        {short_desc, "Show Nova application configuration"},
+        {desc, "Displays all Nova configuration keys with their values or defaults"}
     ]),
     {ok, rebar_state:add_provider(State, Provider)}.
 
@@ -37,16 +37,19 @@ do(State) ->
         {dispatch_backend, persistent_term}
     ],
 
-    lists:foreach(fun({Key, Default}) ->
-        case proplists:get_value(Key, NovaConfig) of
-            undefined when Default =:= required ->
-                io:format("  ~-25s *** MISSING (required) ***~n", [atom_to_list(Key)]);
-            undefined ->
-                io:format("  ~-25s ~p (default)~n", [atom_to_list(Key), Default]);
-            Value ->
-                io:format("  ~-25s ~p~n", [atom_to_list(Key), Value])
-        end
-    end, Defaults),
+    lists:foreach(
+        fun({Key, Default}) ->
+            case proplists:get_value(Key, NovaConfig) of
+                undefined when Default =:= required ->
+                    io:format("  ~-25s *** MISSING (required) ***~n", [atom_to_list(Key)]);
+                undefined ->
+                    io:format("  ~-25s ~p (default)~n", [atom_to_list(Key), Default]);
+                Value ->
+                    io:format("  ~-25s ~p~n", [atom_to_list(Key), Value])
+            end
+        end,
+        Defaults
+    ),
 
     case proplists:get_value(bootstrap_application, NovaConfig) of
         undefined ->

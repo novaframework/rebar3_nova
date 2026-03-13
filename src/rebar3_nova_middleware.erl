@@ -8,15 +8,15 @@
 -spec init(rebar_state:t()) -> {ok, rebar_state:t()}.
 init(State) ->
     Provider = providers:create([
-            {name, ?PROVIDER},
-            {module, ?MODULE},
-            {namespace, nova},
-            {bare, true},
-            {deps, ?DEPS},
-            {example, "rebar3 nova middleware"},
-            {opts, []},
-            {short_desc, "Show middleware/plugin chain for all routes"},
-            {desc, "Lists global and per-route-group plugins configured for the Nova application"}
+        {name, ?PROVIDER},
+        {module, ?MODULE},
+        {namespace, nova},
+        {bare, true},
+        {deps, ?DEPS},
+        {example, "rebar3 nova middleware"},
+        {opts, []},
+        {short_desc, "Show middleware/plugin chain for all routes"},
+        {desc, "Lists global and per-route-group plugins configured for the Nova application"}
     ]),
     {ok, rebar_state:add_provider(State, Provider)}.
 
@@ -50,34 +50,38 @@ get_routes(Router, Env) ->
     end.
 
 print_groups(Groups, GlobalPlugins) ->
-    lists:foreach(fun(Group) ->
-        Prefix = maps:get(prefix, Group, ""),
-        Security = maps:get(security, Group, false),
-        Routes = maps:get(routes, Group, []),
+    lists:foreach(
+        fun(Group) ->
+            Prefix = maps:get(prefix, Group, ""),
+            Security = maps:get(security, Group, false),
+            Routes = maps:get(routes, Group, []),
 
-        PrefixDisplay = case Prefix of
-            "" -> "/";
-            P -> P
+            PrefixDisplay =
+                case Prefix of
+                    "" -> "/";
+                    P -> P
+                end,
+            io:format("~n  Group: prefix=~s  security=~p~n", [PrefixDisplay, Security]),
+
+            io:format("  Plugins:~n"),
+            case maps:is_key(plugins, Group) of
+                true ->
+                    case maps:get(plugins, Group) of
+                        [] -> io:format("    (none)~n");
+                        Plugins -> print_plugins(Plugins, "    ")
+                    end;
+                false when GlobalPlugins =:= [] ->
+                    io:format("    (inherits global: none)~n");
+                false ->
+                    io:format("    (inherits global)~n"),
+                    print_plugins(GlobalPlugins, "    ")
+            end,
+
+            io:format("  Routes:~n"),
+            lists:foreach(fun(Route) -> print_route(Route) end, Routes)
         end,
-        io:format("~n  Group: prefix=~s  security=~p~n", [PrefixDisplay, Security]),
-
-        io:format("  Plugins:~n"),
-        case maps:is_key(plugins, Group) of
-            true ->
-                case maps:get(plugins, Group) of
-                    [] -> io:format("    (none)~n");
-                    Plugins -> print_plugins(Plugins, "    ")
-                end;
-            false when GlobalPlugins =:= [] ->
-                io:format("    (inherits global: none)~n");
-            false ->
-                io:format("    (inherits global)~n"),
-                print_plugins(GlobalPlugins, "    ")
-        end,
-
-        io:format("  Routes:~n"),
-        lists:foreach(fun(Route) -> print_route(Route) end, Routes)
-    end, Groups).
+        Groups
+    ).
 
 print_route({Path, Handler, Opts}) ->
     Methods = maps:get(methods, Opts, ['_']),
@@ -101,11 +105,14 @@ format_methods(Methods) ->
 print_plugins([], _Indent) ->
     io:format("~s(none)~n", [_Indent]);
 print_plugins(Plugins, Indent) ->
-    lists:foreach(fun
-        ({Type, Plugin, Opts}) ->
-            io:format("~s~s: ~s ~p~n", [Indent, Type, Plugin, Opts]);
-        ({Type, Plugin}) ->
-            io:format("~s~s: ~s~n", [Indent, Type, Plugin]);
-        (Other) ->
-            io:format("~s~p~n", [Indent, Other])
-    end, Plugins).
+    lists:foreach(
+        fun
+            ({Type, Plugin, Opts}) ->
+                io:format("~s~s: ~s ~p~n", [Indent, Type, Plugin, Opts]);
+            ({Type, Plugin}) ->
+                io:format("~s~s: ~s~n", [Indent, Type, Plugin]);
+            (Other) ->
+                io:format("~s~p~n", [Indent, Other])
+        end,
+        Plugins
+    ).

@@ -1,17 +1,17 @@
-{application, rebar3_nova,
- [{description, "A rebar plugin"},
-  {vsn, git},
-  {registered, []},
-  {applications,
-   [kernel,
-    stdlib,
-    nova,
-    routing_tree,
-    enotify
-   ]},
-  {env,[]},
-  {modules, []},
+{application, rebar3_nova, [
+    {description, "A rebar plugin"},
+    {vsn, git},
+    {registered, []},
+    {applications, [
+        kernel,
+        stdlib,
+        nova,
+        routing_tree,
+        enotify
+    ]},
+    {env, []},
+    {modules, []},
 
-  {licenses, ["Apache 2.0"]},
-  {links, []}
- ]}.
+    {licenses, ["Apache 2.0"]},
+    {links, []}
+]}.
