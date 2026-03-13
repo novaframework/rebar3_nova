@@ -8,18 +8,20 @@
 -spec init(rebar_state:t()) -> {ok, rebar_state:t()}.
 init(State) ->
     Provider = providers:create([
-            {name, ?PROVIDER},
-            {module, ?MODULE},
-            {namespace, nova},
-            {bare, true},
-            {deps, ?DEPS},
-            {example, "rebar3 nova gen_resource --name users"},
-            {opts, [
-                {name, $n, "name", string, "Resource name (required)"},
-                {actions, $a, "actions", {string, "list,show,create,update,delete"}, "Comma-separated actions"}
-            ]},
-            {short_desc, "Generate controller, schema, and route hints"},
-            {desc, "Generates a controller, JSON schema, and prints route snippets to add to your router"}
+        {name, ?PROVIDER},
+        {module, ?MODULE},
+        {namespace, nova},
+        {bare, true},
+        {deps, ?DEPS},
+        {example, "rebar3 nova gen_resource --name users"},
+        {opts, [
+            {name, $n, "name", string, "Resource name (required)"},
+            {actions, $a, "actions", {string, "list,show,create,update,delete"},
+                "Comma-separated actions"}
+        ]},
+        {short_desc, "Generate controller, schema, and route hints"},
+        {desc,
+            "Generates a controller, JSON schema, and prints route snippets to add to your router"}
     ]),
     {ok, rebar_state:add_provider(State, Provider)}.
 
@@ -62,19 +64,33 @@ generate_schema(AppDir, Name) ->
 print_route_hints(AppName, Name, Actions) ->
     Controller = io_lib:format("~s_~s_controller", [AppName, Name]),
     rebar_api:info("~nAdd these routes to your router:~n", []),
-    lists:foreach(fun(list) ->
-        rebar_api:info("  {<<\"/~s\">>, {~s, list}, #{methods => [get]}}", [Name, Controller]);
-    (show) ->
-        rebar_api:info("  {<<\"/~s/:id\">>, {~s, show}, #{methods => [get]}}", [Name, Controller]);
-    (create) ->
-        rebar_api:info("  {<<\"/~s\">>, {~s, create}, #{methods => [post]}}", [Name, Controller]);
-    (update) ->
-        rebar_api:info("  {<<\"/~s/:id\">>, {~s, update}, #{methods => [put]}}", [Name, Controller]);
-    (delete) ->
-        rebar_api:info("  {<<\"/~s/:id\">>, {~s, delete}, #{methods => [delete]}}", [Name, Controller]);
-    (_) ->
-        ok
-    end, Actions).
+    lists:foreach(
+        fun
+            (list) ->
+                rebar_api:info("  {<<\"/~s\">>, {~s, list}, #{methods => [get]}}", [
+                    Name, Controller
+                ]);
+            (show) ->
+                rebar_api:info("  {<<\"/~s/:id\">>, {~s, show}, #{methods => [get]}}", [
+                    Name, Controller
+                ]);
+            (create) ->
+                rebar_api:info("  {<<\"/~s\">>, {~s, create}, #{methods => [post]}}", [
+                    Name, Controller
+                ]);
+            (update) ->
+                rebar_api:info("  {<<\"/~s/:id\">>, {~s, update}, #{methods => [put]}}", [
+                    Name, Controller
+                ]);
+            (delete) ->
+                rebar_api:info("  {<<\"/~s/:id\">>, {~s, delete}, #{methods => [delete]}}", [
+                    Name, Controller
+                ]);
+            (_) ->
+                ok
+        end,
+        Actions
+    ).
 
 singularize(Name) ->
     case lists:reverse(Name) of

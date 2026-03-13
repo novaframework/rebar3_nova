@@ -8,17 +8,17 @@
 -spec init(rebar_state:t()) -> {ok, rebar_state:t()}.
 init(State) ->
     Provider = providers:create([
-            {name, ?PROVIDER},
-            {module, ?MODULE},
-            {namespace, nova},
-            {bare, true},
-            {deps, ?DEPS},
-            {example, "rebar3 nova release --profile prod"},
-            {opts, [
-                {profile, $p, "profile", {string, "prod"}, "Release profile to use"}
-            ]},
-            {short_desc, "Build a Nova release"},
-            {desc, "Regenerates OpenAPI spec if schemas exist, then builds a release"}
+        {name, ?PROVIDER},
+        {module, ?MODULE},
+        {namespace, nova},
+        {bare, true},
+        {deps, ?DEPS},
+        {example, "rebar3 nova release --profile prod"},
+        {opts, [
+            {profile, $p, "profile", {string, "prod"}, "Release profile to use"}
+        ]},
+        {short_desc, "Build a Nova release"},
+        {desc, "Regenerates OpenAPI spec if schemas exist, then builds a release"}
     ]),
     {ok, rebar_state:add_provider(State, Provider)}.
 
