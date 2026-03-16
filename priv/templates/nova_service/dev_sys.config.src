@@ -1,0 +1,64 @@
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+
+[
+ {kernel, [
+           {logger_level, debug},
+           #{formatter => {flatlog, #{
+                                      map_depth => 3,
+                                      term_depth => 50,
+                                      colored => true,
+                                      template => [colored_start, "[\033[1m", level, "\033[0m", colored_start,"] [", time, "]",
+                                                   colored_end, " ", msg, " (", mfa, ")\n"]
+                                     }}}
+          ]},
+ {nova, [
+         {use_stacktrace, true},
+         {environment, dev},
+         {cowboy_configuration, #{
+                                  port => 8080,
+                                  stream_handlers => [otel_nova_stream_h, nova_stream_h, cowboy_compress_h, cowboy_stream_h]
+                                 }},
+         {dev_mode, true},
+         {bootstrap_application, {{name}}},
+         {plugins, [
+                    {pre_request, nova_request_plugin, #{decode_json_body => true}}
+                   ]}
+        ]},
+ {opentelemetry, [
+     {span_processor, batch},
+     {traces_exporter, {opentelemetry_exporter, #{
+         protocol => http_protobuf,
+         endpoints => [#{host => "localhost", port => 4318, path => "/v1/traces"}]
+     }}}
+ ]},
+ {opentelemetry_experimental, [
+     {readers, [
+         #{module => otel_metric_reader,
+           config => #{
+               export_interval_ms => 5000,
+               exporter => {otel_nova_prom_exporter, #{}}
+           }}
+     ]}
+ ]},
+ {pgo, [
+     {pools, [
+         {default, #{
+             pool_size => 10,
+             host => "localhost",
+             port => 5432,
+             database => "{{name}}_dev",
+             user => "postgres",
+             password => "postgres"
+         }}
+     ]}
+ ]},
+ {brod, [
+     {clients, [
+         {kafka_client, [
+             {endpoints, [{"localhost", 9092}]},
+             {auto_start_producers, true},
+             {default_producer_config, []}
+         ]}
+     ]}
+ ]}
+].

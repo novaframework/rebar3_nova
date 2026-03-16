@@ -1,0 +1,62 @@
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+
+[
+ {kernel, [
+           {logger_level, info},
+           {logger,
+            [{handler, default, logger_std_h,
+              #{level => error,
+                config => #{file => "log/erlang.log"}}}
+            ]}
+          ]},
+ {nova, [
+         {use_stacktrace, false},
+         {environment, prod},
+         {cowboy_configuration, #{
+                                  port => 8080,
+                                  stream_handlers => [otel_nova_stream_h, nova_stream_h, cowboy_compress_h, cowboy_stream_h]
+                                 }},
+         {dev_mode, false},
+         {bootstrap_application, {{name}}},
+         {plugins, [
+                    {pre_request, nova_request_plugin, #{decode_json_body => true}}
+                   ]}
+        ]},
+ {opentelemetry, [
+     {span_processor, batch},
+     {traces_exporter, {opentelemetry_exporter, #{
+         protocol => http_protobuf,
+         endpoints => [#{host => "${OTEL_ENDPOINT}", port => 4318, path => "/v1/traces"}]
+     }}}
+ ]},
+ {opentelemetry_experimental, [
+     {readers, [
+         #{module => otel_metric_reader,
+           config => #{
+               export_interval_ms => 5000,
+               exporter => {otel_nova_prom_exporter, #{}}
+           }}
+     ]}
+ ]},
+ {pgo, [
+     {pools, [
+         {default, #{
+             pool_size => 20,
+             host => "${DB_HOST}",
+             port => 5432,
+             database => "${DB_NAME}",
+             user => "${DB_USER}",
+             password => "${DB_PASSWORD}"
+         }}
+     ]}
+ ]},
+ {brod, [
+     {clients, [
+         {kafka_client, [
+             {endpoints, [{"${KAFKA_HOST}", 9092}]},
+             {auto_start_producers, true},
+             {default_producer_config, []}
+         ]}
+     ]}
+ ]}
+].

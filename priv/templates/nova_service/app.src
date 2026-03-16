@@ -1,0 +1,22 @@
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+{application, {{name}}, [
+    {description, "{{name}} managed by Nova"},
+    {vsn, git},
+    {registered, []},
+    {mod, {{{name}}_app, []}},
+    {included_applications, []},
+    {applications, [
+        kernel,
+        stdlib,
+        opentelemetry,
+        nova,
+        opentelemetry_nova,
+        pgo,
+        brod
+    ]},
+    {env, []},
+    {modules, []},
+    {maintainers, []},
+    {licenses, ["Apache 2.0"]},
+    {links, []}
+]}.

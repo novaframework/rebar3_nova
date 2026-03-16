@@ -1,0 +1,34 @@
+{description, "Production-ready Nova backend service with healthchecks, PostgreSQL, Kafka, OpenTelemetry, Dockerfile and CI"}.
+{variables, [
+    {name, "project", "Name of the project"}
+]}.
+
+{dir, "{{name}}"}.
+{dir, "{{name}}/.github"}.
+{dir, "{{name}}/.github/workflows"}.
+{dir, "{{name}}/priv"}.
+{dir, "{{name}}/priv/assets"}.
+{dir, "{{name}}/config"}.
+{dir, "{{name}}/src/controllers"}.
+{dir, "{{name}}/src/views"}.
+
+{template, "nova_service/rebar.config", "{{name}}/rebar.config"}.
+{template, "nova_service/app.src", "{{name}}/src/{{name}}.app.src"}.
+{template, "nova_service/app.erl", "{{name}}/src/{{name}}_app.erl"}.
+{template, "nova/sup.erl", "{{name}}/src/{{name}}_sup.erl"}.
+{template, "nova_service/router.erl", "{{name}}/src/{{name}}_router.erl"}.
+{template, "nova/controller.erl", "{{name}}/src/controllers/{{name}}_main_controller.erl"}.
+{template, "nova_service/health_controller.erl", "{{name}}/src/controllers/{{name}}_health_controller.erl"}.
+{template, "nova_service/dev_sys.config.src", "{{name}}/config/dev_sys.config.src"}.
+{template, "nova_service/prod_sys.config.src", "{{name}}/config/prod_sys.config.src"}.
+{template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
+{template, "nova_service/docker-compose.yml", "{{name}}/docker-compose.yml"}.
+{template, "nova_service/Dockerfile", "{{name}}/Dockerfile"}.
+
+{file, "nova/favicon.ico", "{{name}}/priv/assets/favicon.ico"}.
+{file, "nova/controller.dtl", "{{name}}/src/views/{{name}}_main.dtl"}.
+{file, "nova/.tool-versions", "{{name}}/.tool-versions"}.
+{file, "nova_service/.gitignore", "{{name}}/.gitignore"}.
+{file, "nova_service/ci.yml", "{{name}}/.github/workflows/ci.yml"}.
+{file, "nova_service/release.yml", "{{name}}/.github/workflows/release.yml"}.
+{file, "nova_service/Makefile", "{{name}}/Makefile"}.
