@@ -1,0 +1,34 @@
+-module({{{mod}}}).
+-behaviour(kura_migration).
+-include_lib("kura/include/kura.hrl").
+
+-export([up/0, down/0]).
+
+up() ->
+    [{execute, <<"CREATE EXTENSION IF NOT EXISTS citext">>},
+     {create_table, <<"users">>, [
+         #kura_column{name = id, type = id, primary_key = true},
+         #kura_column{name = email, type = string, nullable = false},
+         #kura_column{name = hashed_password, type = string, nullable = false},
+         #kura_column{name = confirmed_at, type = utc_datetime},
+         #kura_column{name = inserted_at, type = utc_datetime},
+         #kura_column{name = updated_at, type = utc_datetime}
+     ]},
+     {create_index, <<"users_email_index">>, <<"users">>, [email], [unique]},
+     {create_table, <<"user_tokens">>, [
+         #kura_column{name = id, type = id, primary_key = true},
+         #kura_column{name = user_id, type = integer, nullable = false},
+         #kura_column{name = token, type = string, nullable = false},
+         #kura_column{name = context, type = string, nullable = false},
+         #kura_column{name = inserted_at, type = utc_datetime}
+     ]},
+     {create_index, <<"user_tokens_user_id_index">>, <<"user_tokens">>, [user_id], []},
+     {create_index, <<"user_tokens_context_token_index">>, <<"user_tokens">>,
+         [context, token], [unique]},
+     {execute, <<"ALTER TABLE user_tokens ADD CONSTRAINT user_tokens_user_id_fkey "
+                 "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE">>}
+    ].
+
+down() ->
+    [{drop_table, <<"user_tokens">>},
+     {drop_table, <<"users">>}].

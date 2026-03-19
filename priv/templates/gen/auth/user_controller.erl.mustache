@@ -1,0 +1,38 @@
+{{=<% %>=}}
+-module(<%mod%>).
+
+-export([show/1, update_password/1, update_email/1]).
+
+show(Req) ->
+    User = maps:get(auth_data, Req),
+    {json, #{<<"user">> => <%accounts%>:user_to_json(User)}}.
+
+update_password(Req) ->
+    User = maps:get(auth_data, Req),
+    #{<<"current_password">> := CurrentPassword} = maps:get(json, Req),
+    NewParams = maps:get(json, Req),
+    case <%accounts%>:change_user_password(User, CurrentPassword, NewParams) of
+        {ok, UpdatedUser} ->
+            {ok, Token} = <%accounts%>:generate_session_token(UpdatedUser),
+            ok = nova_session:set(Req, <<"session_token">>, Token),
+            {json, #{<<"user">> => <%accounts%>:user_to_json(UpdatedUser)}};
+        {error, invalid_password} ->
+            {json, 401, #{}, #{<<"error">> => <<"invalid current password">>}};
+        {error, CS} ->
+            {json, 422, #{}, #{<<"errors">> => <%accounts%>:format_errors(CS)}}
+    end.
+
+update_email(Req) ->
+    User = maps:get(auth_data, Req),
+    #{<<"current_password">> := CurrentPassword} = maps:get(json, Req),
+    NewParams = maps:get(json, Req),
+    case <%accounts%>:change_user_email(User, CurrentPassword, NewParams) of
+        {ok, UpdatedUser} ->
+            {ok, Token} = <%accounts%>:generate_session_token(UpdatedUser),
+            ok = nova_session:set(Req, <<"session_token">>, Token),
+            {json, #{<<"user">> => <%accounts%>:user_to_json(UpdatedUser)}};
+        {error, invalid_password} ->
+            {json, 401, #{}, #{<<"error">> => <<"invalid current password">>}};
+        {error, CS} ->
+            {json, 422, #{}, #{<<"errors">> => <%accounts%>:format_errors(CS)}}
+    end.

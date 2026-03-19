@@ -8,7 +8,13 @@
     write_file_if_not_exists/2,
     copy_priv_file/2,
     parse_actions/1,
-    load_sys_config/1
+    parse_fields/1,
+    load_sys_config/1,
+    singularize/1,
+    pluralize/1,
+    capitalize/1,
+    timestamp/0,
+    render_template/2
 ]).
 
 -spec get_app_name(rebar_state:t()) -> atom().
@@ -56,6 +62,11 @@ parse_actions(Str) ->
     Tokens = string:tokens(Str, ","),
     [erlang:list_to_atom(string:trim(T)) || T <- Tokens].
 
+-spec parse_fields(string()) -> [{string(), string()}].
+parse_fields(Str) ->
+    Pairs = string:tokens(Str, ","),
+    [parse_field(string:trim(P)) || P <- Pairs].
+
 -spec load_sys_config(rebar_state:t()) -> [{atom(), term()}].
 load_sys_config(State) ->
     ShellOpts = rebar_state:get(State, shell, []),
@@ -72,9 +83,53 @@ load_sys_config(State) ->
             []
     end.
 
+-spec singularize(string()) -> string().
+singularize(Name) ->
+    case lists:reverse(Name) of
+        [$s | Rest] -> lists:reverse(Rest);
+        _ -> Name
+    end.
+
+-spec pluralize(string()) -> string().
+pluralize(Name) ->
+    case lists:last(Name) of
+        $s -> Name;
+        _ -> Name ++ "s"
+    end.
+
+-spec capitalize(string()) -> string().
+capitalize([H | T]) when H >= $a, H =< $z ->
+    [H - 32 | T];
+capitalize(Other) ->
+    Other.
+
+-spec timestamp() -> string().
+timestamp() ->
+    {{Y, Mo, D}, {H, Mi, S}} = calendar:universal_time(),
+    lists:flatten(
+        io_lib:format(
+            "~4..0B~2..0B~2..0B~2..0B~2..0B~2..0B",
+            [Y, Mo, D, H, Mi, S]
+        )
+    ).
+
+-spec render_template([string()], map()) -> binary().
+render_template(TemplatePath, Context) ->
+    PrivDir = code:priv_dir(rebar3_nova),
+    Path = filename:join([PrivDir, "templates" | TemplatePath]),
+    {ok, Template} = file:read_file(Path),
+    bbmustache:render(Template, Context, [{key_type, atom}]).
+
 %%----------------------------------------------------------------------
-%% Internal: safe logging (rebar_api may not be available in tests)
+%% Internal
 %%----------------------------------------------------------------------
+
+parse_field(Pair) ->
+    case string:tokens(Pair, ":") of
+        [Name, Type] -> {string:trim(Name), string:trim(Type)};
+        [Name] -> {string:trim(Name), "string"};
+        _ -> erlang:error({bad_field_spec, Pair})
+    end.
 
 log_info(Fmt, Args) ->
     try

@@ -1,0 +1,33 @@
+{{=<% %>=}}
+-module(<%suite%>).
+-include_lib("common_test/include/ct.hrl").
+
+-export([all/0, init_per_suite/1, end_per_suite/1]).
+-export([test_list/1, test_show/1, test_create/1, test_update/1, test_delete/1]).
+
+all() ->
+    [test_list, test_show, test_create, test_update, test_delete].
+
+init_per_suite(Config) ->
+    application:ensure_all_started(inets),
+    application:ensure_all_started(<%app%>),
+    Config.
+
+end_per_suite(_Config) ->
+    application:stop(<%app%>),
+    ok.
+
+test_list(_Config) ->
+    {ok, {{_, 200, _}, _, _}} = httpc:request("http://localhost:8080/<%name%>").
+
+test_show(_Config) ->
+    {ok, {{_, 200, _}, _, _}} = httpc:request("http://localhost:8080/<%name%>/1").
+
+test_create(_Config) ->
+    {ok, {{_, 201, _}, _, _}} = httpc:request(post, {"http://localhost:8080/<%name%>", [], "application/json", "{}"}, [], []).
+
+test_update(_Config) ->
+    {ok, {{_, 200, _}, _, _}} = httpc:request(put, {"http://localhost:8080/<%name%>/1", [], "application/json", "{}"}, [], []).
+
+test_delete(_Config) ->
+    {ok, {{_, 204, _}, _, _}} = httpc:request(delete, {"http://localhost:8080/<%name%>/1", []}, [], []).

@@ -1,0 +1,25 @@
+{{=<% %>=}}
+-module(<%mod%>).
+
+-export([create/1, delete/1]).
+
+create(Req) ->
+    #{<<"email">> := Email, <<"password">> := Password} = maps:get(json, Req),
+    case <%accounts%>:get_user_by_email_and_password(Email, Password) of
+        {ok, User} ->
+            {ok, Token} = <%accounts%>:generate_session_token(User),
+            ok = nova_session:set(Req, <<"session_token">>, Token),
+            {json, #{<<"user">> => <%accounts%>:user_to_json(User)}};
+        {error, _} ->
+            {json, 401, #{}, #{<<"error">> => <<"invalid email or password">>}}
+    end.
+
+delete(Req) ->
+    case nova_session:get(Req, <<"session_token">>) of
+        {ok, Token} ->
+            <%accounts%>:delete_session_token(Token);
+        _ ->
+            ok
+    end,
+    nova_session:delete(Req, <<"session_token">>),
+    {status, 204}.

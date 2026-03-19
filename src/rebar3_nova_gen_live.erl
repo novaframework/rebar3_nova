@@ -1,6 +1,6 @@
 -module(rebar3_nova_gen_live).
 
--export([init/1, do/1, format_error/1]).
+-export([init/1, do/1, run/1, run/2, format_error/1]).
 -export([generate/5, generate_optional/5]).
 
 -define(PROVIDER, gen_live).
@@ -23,7 +23,8 @@ init(State) ->
                 "Comma-separated view actions"},
             {no_schema, undefined, "no-schema", boolean, "Skip schema and migration generation"}
         ]},
-        {short_desc, "Generate Arizona LiveView CRUD views for a resource"},
+        {short_desc,
+            "Generate Arizona LiveView CRUD views (deprecated: use `rebar3 nova gen live`)"},
         {desc,
             "Generates Arizona views, Kura schema, migration, and test suite\n"
             "for a resource. Similar to Phoenix's phx.gen.live.\n\n"
@@ -36,10 +37,21 @@ init(State) ->
 
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
+    rebar_api:warn("gen_live is deprecated. Use `rebar3 nova gen live` instead.", []),
+    run(State).
+
+-spec run(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
+run(State) ->
     {Args, _} = rebar_state:command_parsed_args(State),
+    run(State, Args).
+
+-spec run(rebar_state:t(), proplists:proplist()) -> {ok, rebar_state:t()} | {error, string()}.
+run(State, Args) ->
     case {proplists:get_value(name, Args), proplists:get_value(fields, Args)} of
         {undefined, _} ->
-            rebar_api:abort("--name is required", []);
+            rebar_api:abort(
+                "Name is required. Usage: rebar3 nova gen live <name> --fields ...", []
+            );
         {_, undefined} ->
             rebar_api:abort("--fields is required", []);
         {Name, FieldsStr} ->
@@ -47,7 +59,7 @@ do(State) ->
             AppDir = rebar3_nova_utils:get_app_dir(State),
             ActionsStr = proplists:get_value(actions, Args, "index,show,new,edit"),
             Actions = rebar3_nova_utils:parse_actions(ActionsStr),
-            Fields = parse_fields(FieldsStr),
+            Fields = rebar3_nova_utils:parse_fields(FieldsStr),
             Opts = #{
                 no_schema => proplists:get_value(no_schema, Args, false)
             },
@@ -64,7 +76,7 @@ format_error(Reason) ->
 -spec generate(atom(), file:filename(), string(), [{string(), string()}], [atom()]) -> ok.
 generate(AppName, AppDir, Name, Fields, Actions) ->
     App = atom_to_list(AppName),
-    Singular = singularize(Name),
+    Singular = rebar3_nova_utils:singularize(Name),
     lists:foreach(
         fun(Action) ->
             generate_view(App, AppDir, Singular, Name, Fields, Action)
@@ -78,7 +90,7 @@ generate(AppName, AppDir, Name, Fields, Actions) ->
 
 generate_optional(AppName, AppDir, Name, Fields, Opts) ->
     App = atom_to_list(AppName),
-    Singular = singularize(Name),
+    Singular = rebar3_nova_utils:singularize(Name),
     case maps:get(no_schema, Opts, false) of
         false ->
             generate_schema(App, AppDir, Singular, Name, Fields),
@@ -142,12 +154,12 @@ index_view_content(Mod, App, Singular, Plural, Fields) ->
         "    arizona_template:from_html(~\"\"\"\"\n"
         "    <div class=\"container\">\n"
         "        <h1>",
-        capitalize(Plural),
+        rebar3_nova_utils:capitalize(Plural),
         "</h1>\n"
         "        <a href=\"/",
         Plural,
         "/new\" class=\"btn\">New ",
-        capitalize(Singular),
+        rebar3_nova_utils:capitalize(Singular),
         "</a>\n"
         "        <table>\n"
         "            <thead>\n"
@@ -205,7 +217,7 @@ index_view_content(Mod, App, Singular, Plural, Fields) ->
 
 table_headers(Fields) ->
     iolist_to_binary([
-        ["                    <th>", capitalize(Name), "</th>\n"]
+        ["                    <th>", rebar3_nova_utils:capitalize(Name), "</th>\n"]
      || {Name, _Type} <- Fields
     ]).
 
@@ -240,40 +252,40 @@ show_view_content(Mod, App, Singular, Fields) ->
         " => Item}, none).\n\n"
         "render(Bindings) ->\n"
         "    ",
-        capitalize(Singular),
+        rebar3_nova_utils:capitalize(Singular),
         " = arizona_template:get_binding(",
         Singular,
         ", Bindings),\n"
         "    arizona_template:from_html(~\"\"\"\n"
         "    <div class=\"container\">\n"
         "        <h1>",
-        capitalize(Singular),
+        rebar3_nova_utils:capitalize(Singular),
         "</h1>\n"
         "        <dl>\n",
         show_fields(Singular, Fields),
         "        </dl>\n"
         "        <a href=\"/",
-        pluralize(Singular),
+        rebar3_nova_utils:pluralize(Singular),
         "\">Back</a>\n"
         "        <a href=\"/",
-        pluralize(Singular),
+        rebar3_nova_utils:pluralize(Singular),
         "/{maps:get(id, ",
-        capitalize(Singular),
+        rebar3_nova_utils:capitalize(Singular),
         ")}/edit\">Edit</a>\n"
         "    </div>\n"
         "    \"\"\").\n"
     ]).
 
-show_fields(_Singular, Fields) ->
+show_fields(Singular, Fields) ->
     iolist_to_binary([
         [
             "            <dt>",
-            capitalize(Name),
+            rebar3_nova_utils:capitalize(Name),
             "</dt>\n"
             "            <dd>{maps:get(",
             Name,
             ", ",
-            capitalize(_Singular),
+            rebar3_nova_utils:capitalize(Singular),
             ")}</dd>\n"
         ]
      || {Name, _Type} <- Fields
@@ -300,13 +312,13 @@ new_view_content(Mod, App, Singular, Fields) ->
         "    arizona_template:from_html(~\"\"\"\n"
         "    <div class=\"container\">\n"
         "        <h1>New ",
-        capitalize(Singular),
+        rebar3_nova_utils:capitalize(Singular),
         "</h1>\n"
         "        <form onsubmit=\"arizona.pushEvent('save', this)\">\n",
         form_fields(Fields),
         "            <button type=\"submit\">Create</button>\n"
         "            <a href=\"/",
-        pluralize(Singular),
+        rebar3_nova_utils:pluralize(Singular),
         "\">Cancel</a>\n"
         "        </form>\n"
         "    </div>\n"
@@ -325,7 +337,7 @@ new_view_content(Mod, App, Singular, Fields) ->
         ", CS1) of\n"
         "        {ok, _} ->\n"
         "            {[{redirect, ~\"/",
-        pluralize(Singular),
+        rebar3_nova_utils:pluralize(Singular),
         "\", #{}}], View};\n"
         "        {error, Changeset} ->\n"
         "            Errors = maps:get(errors, Changeset, []),\n"
@@ -361,20 +373,20 @@ edit_view_content(Mod, App, Singular, Fields) ->
         " => Item, errors => []}, none).\n\n"
         "render(Bindings) ->\n"
         "    ",
-        capitalize(Singular),
+        rebar3_nova_utils:capitalize(Singular),
         " = arizona_template:get_binding(",
         Singular,
         ", Bindings),\n"
         "    arizona_template:from_html(~\"\"\"\n"
         "    <div class=\"container\">\n"
         "        <h1>Edit ",
-        capitalize(Singular),
+        rebar3_nova_utils:capitalize(Singular),
         "</h1>\n"
         "        <form onsubmit=\"arizona.pushEvent('save', this)\">\n",
         edit_form_fields(Singular, Fields),
         "            <button type=\"submit\">Update</button>\n"
         "            <a href=\"/",
-        pluralize(Singular),
+        rebar3_nova_utils:pluralize(Singular),
         "\">Cancel</a>\n"
         "        </form>\n"
         "    </div>\n"
@@ -382,12 +394,12 @@ edit_view_content(Mod, App, Singular, Fields) ->
         "handle_event(~\"save\", Params, View) ->\n"
         "    State0 = arizona_view:get_state(View),\n"
         "    ",
-        capitalize(Singular),
+        rebar3_nova_utils:capitalize(Singular),
         " = arizona_stateful:get_binding(",
         Singular,
         ", State0),\n"
         "    Id = maps:get(id, ",
-        capitalize(Singular),
+        rebar3_nova_utils:capitalize(Singular),
         "),\n"
         "    {ok, Existing} = kura_repo_worker:get(",
         Repo,
@@ -404,7 +416,7 @@ edit_view_content(Mod, App, Singular, Fields) ->
         ", CS) of\n"
         "        {ok, _} ->\n"
         "            {[{redirect, ~\"/",
-        pluralize(Singular),
+        rebar3_nova_utils:pluralize(Singular),
         "\", #{}}], View};\n"
         "        {error, Changeset} ->\n"
         "            Errors = maps:get(errors, Changeset, []),\n"
@@ -421,7 +433,7 @@ form_fields(Fields) ->
     iolist_to_binary([form_field(Name, Type) || {Name, Type} <- Fields]).
 
 form_field(Name, Type) ->
-    Label = capitalize(Name),
+    Label = rebar3_nova_utils:capitalize(Name),
     InputType = field_to_input_type(Type),
     case InputType of
         "textarea" ->
@@ -461,9 +473,9 @@ edit_form_fields(Singular, Fields) ->
     iolist_to_binary([edit_form_field(Singular, Name, Type) || {Name, Type} <- Fields]).
 
 edit_form_field(Singular, Name, Type) ->
-    Label = capitalize(Name),
+    Label = rebar3_nova_utils:capitalize(Name),
     InputType = field_to_input_type(Type),
-    Value = "maps:get(" ++ Name ++ ", " ++ capitalize(Singular) ++ ")",
+    Value = "maps:get(" ++ Name ++ ", " ++ rebar3_nova_utils:capitalize(Singular) ++ ")",
     case InputType of
         "textarea" ->
             [
@@ -560,7 +572,7 @@ schema_fields(Fields) ->
 %%======================================================================
 
 generate_migration(AppDir, Table, Fields) ->
-    TS = timestamp(),
+    TS = rebar3_nova_utils:timestamp(),
     Mod = "m" ++ TS ++ "_create_" ++ Table,
     FileName = filename:join([AppDir, "src", "migrations", Mod ++ ".erl"]),
     Content = migration_content(Mod, Table, Fields),
@@ -653,9 +665,9 @@ test_content(Mod, App, Singular, _Plural, _Fields) ->
 %%======================================================================
 
 print_route_hints(AppName, Plural, Actions) ->
-    Singular = singularize(Plural),
+    Singular = rebar3_nova_utils:singularize(Plural),
     rebar_api:info("~nAdd these routes to your router:~n", []),
-    rebar_api:info("  %% ~s views", [capitalize(Singular)]),
+    rebar_api:info("  %% ~s views", [rebar3_nova_utils:capitalize(Singular)]),
     lists:foreach(
         fun(Action) -> print_route_hint(AppName, Singular, Plural, Action) end,
         Actions
@@ -687,43 +699,6 @@ print_route_hint(_, _, _, _) ->
 %%======================================================================
 %% Internal: helpers
 %%======================================================================
-
-parse_fields(Str) ->
-    Pairs = string:tokens(Str, ","),
-    [parse_field(string:trim(P)) || P <- Pairs].
-
-parse_field(Pair) ->
-    case string:tokens(Pair, ":") of
-        [Name, Type] -> {string:trim(Name), string:trim(Type)};
-        [Name] -> {string:trim(Name), "string"};
-        _ -> erlang:error({bad_field_spec, Pair})
-    end.
-
-singularize(Name) ->
-    case lists:reverse(Name) of
-        [$s | Rest] -> lists:reverse(Rest);
-        _ -> Name
-    end.
-
-pluralize(Name) ->
-    case lists:last(Name) of
-        $s -> Name;
-        _ -> Name ++ "s"
-    end.
-
-capitalize([H | T]) when H >= $a, H =< $z ->
-    [H - 32 | T];
-capitalize(Other) ->
-    Other.
-
-timestamp() ->
-    {{Y, Mo, D}, {H, Mi, S}} = calendar:universal_time(),
-    lists:flatten(
-        io_lib:format(
-            "~4..0B~2..0B~2..0B~2..0B~2..0B~2..0B",
-            [Y, Mo, D, H, Mi, S]
-        )
-    ).
 
 field_names_list(Fields) ->
     Names = [Name || {Name, _Type} <- Fields],

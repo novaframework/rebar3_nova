@@ -1,0 +1,20 @@
+-module({{{mod}}}).
+
+-export([require_authenticated/1]).
+
+require_authenticated(Req) ->
+    case nova_session:get(Req, <<"session_token">>) of
+        {ok, Token} ->
+            case {{{accounts}}}:get_user_by_session_token(Token) of
+                {ok, User} ->
+                    {true, User};
+                _ ->
+                    unauthorized()
+            end;
+        _ ->
+            unauthorized()
+    end.
+
+unauthorized() ->
+    Body = json:encode(#{<<"error">> => <<"unauthorized">>}),
+    {false, 401, #{<<"content-type">> => <<"application/json">>}, Body}.
