@@ -285,10 +285,20 @@ rebar_plugins(Flags) ->
             false ->
                 []
         end,
+    KuraPlugin =
+        case maps:get(kura, Flags) of
+            true ->
+                [
+                    "    {rebar3_kura, {git, \"https://github.com/Taure/rebar3_kura.git\", {branch, \"main\"}}},\n"
+                ];
+            false ->
+                []
+        end,
     [
         "{project_plugins, [\n",
         ErlydtlPlugin,
         LfePlugin,
+        KuraPlugin,
         "    {rebar3_nova, \".*\",\n",
         "        {git, \"https://github.com/novaframework/rebar3_nova.git\", {branch, \"master\"}}},\n",
         "    {erlfmt, \"~>1.7\"}\n",
