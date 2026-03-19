@@ -1022,17 +1022,18 @@ generate_home_view(Name) ->
     Content = [
         "-module(",
         Name,
-        "_home_view).\n\n",
+        "_home_view).\n",
+        "-compile({parse_transform, arizona_parse_transform}).\n",
         "-behaviour(arizona_view).\n\n",
         "-export([mount/2, render/1]).\n\n",
-        "mount(_Params, State) ->\n",
-        "    {ok, arizona_state:put_assign(message, <<\"Hello from Arizona!\">>, State)}.\n\n",
-        "render(State) ->\n",
-        "    {ok, <<\"\n",
-        "        <div id=\\\"app\\\">\n",
-        "            <h1>{@message}</h1>\n",
-        "        </div>\n",
-        "    \">>, State}.\n"
+        "mount(_MountArg, _Request) ->\n",
+        "    arizona_view:new(?MODULE, #{message => ~\"Hello from Arizona!\"}, none).\n\n",
+        "render(Bindings) ->\n",
+        "    arizona_template:from_html(~\"\"\"\n",
+        "    <div id=\"app\">\n",
+        "        <h1>{arizona_template:get_binding(message, Bindings)}</h1>\n",
+        "    </div>\n",
+        "    \"\"\").\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
 

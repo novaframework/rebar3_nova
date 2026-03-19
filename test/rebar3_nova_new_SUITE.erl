@@ -140,6 +140,12 @@ arizona_flag(_Config) ->
     assert_file_exists(Name, "priv/assets/app.css"),
     assert_file_not_exists(Name, "src/views/testapp_arizona_main.dtl"),
 
+    HomeView = read_file(Name, "src/views/testapp_arizona_home_view.erl"),
+    assert_contains(HomeView, "arizona_parse_transform"),
+    assert_contains(HomeView, "arizona_view:new(?MODULE"),
+    assert_contains(HomeView, "arizona_template:from_html"),
+    assert_contains(HomeView, "arizona_template:get_binding(message"),
+
     RebarConfig = read_file(Name, "rebar.config"),
     assert_contains(RebarConfig, "arizona_core"),
     assert_contains(RebarConfig, "arizona_nova"),
