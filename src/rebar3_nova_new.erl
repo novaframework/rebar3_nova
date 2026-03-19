@@ -299,6 +299,7 @@ rebar_plugins(Flags) ->
         ErlydtlPlugin,
         LfePlugin,
         KuraPlugin,
+        "    {rebar3_nova, {git, \"https://github.com/Taure/rebar3_nova.git\", {branch, \"feat/unified-gen\"}}},\n",
         "    {erlfmt, \"~>1.7\"}\n",
         "]}.\n\n"
     ].
