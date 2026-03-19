@@ -1,0 +1,13 @@
+name: Build and test
+
+on: [push, pull_request]
+
+jobs:
+  ci:
+    uses: Taure/erlang-ci/.github/workflows/ci.yml@v1
+    with:
+      otp-version: '28.0'
+      rebar3-version: '3.26.0'
+      enable-eunit: false
+      enable-ex-doc: true
+      enable-dialyzer: false

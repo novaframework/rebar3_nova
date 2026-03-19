@@ -1,6 +1,9 @@
--sname '{{name}}'
+## Name of the node
+-sname {{name}}
 
+## Cookie for distributed erlang
 -setcookie {{name}}_cookie
 
+## Enable kernel poll and SMP
 +K true
 +A30
