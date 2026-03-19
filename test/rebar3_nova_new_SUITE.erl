@@ -138,7 +138,7 @@ arizona_flag(_Config) ->
     rebar3_nova_new:generate_project(Name, Flags),
 
     assert_file_exists(Name, "src/views/testapp_arizona_home_view.erl"),
-    assert_file_exists(Name, "priv/assets/app.css"),
+    assert_file_exists(Name, "priv/static/assets/app.css"),
     assert_file_not_exists(Name, "src/views/testapp_arizona_main.dtl"),
 
     HomeView = read_file(Name, "src/views/testapp_arizona_home_view.erl"),
@@ -241,7 +241,7 @@ combined_kura_arizona_ci(_Config) ->
     assert_file_exists(Name, "src/testapp_combo_repo.erl"),
     assert_file_exists(Name, "docker-compose.yml"),
     assert_file_exists(Name, "src/views/testapp_combo_home_view.erl"),
-    assert_file_exists(Name, "priv/assets/app.css"),
+    assert_file_exists(Name, "priv/static/assets/app.css"),
     assert_file_exists(Name, ".github/workflows/ci.yml"),
     assert_file_not_exists(Name, "src/views/testapp_combo_main.dtl"),
 

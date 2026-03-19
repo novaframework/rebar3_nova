@@ -621,7 +621,11 @@ generate_router(Name, #{arizona := true}) ->
         "                {\"/\", fun ",
         Name,
         "_main_controller:index/1, #{methods => [get]}},\n",
-        "                {\"/heartbeat\", fun(_) -> {status, 200} end, #{methods => [get]}}\n",
+        "                {\"/heartbeat\", fun(_) -> {status, 200} end, #{methods => [get]}},\n",
+        "                %% App static assets (priv/static/assets/)\n",
+        "                {\"/assets/[...]\", \"static/assets\"},\n",
+        "                %% Arizona JS from arizona_core priv\n",
+        "                {\"/arizona/[...]\", {priv_dir, arizona_core, \"static/assets\"}}\n",
         "            ]\n",
         "        }\n",
         "    ].\n"
@@ -684,7 +688,7 @@ generate_controller(Name, #{arizona := true}) ->
         "            \"<title>",
         Name,
         "</title>\"\n",
-        "            \"<link rel=\\\"stylesheet\\\" href=\\\"/assets/css/app.css\\\">\"\n",
+        "            \"<link rel=\\\"stylesheet\\\" href=\\\"/assets/app.css\\\">\"\n",
         "            \"</head>\"\n",
         "            \"<body>\"\n",
         "            \"<div id=\\\"app\\\"><h1>Welcome to ",
@@ -692,7 +696,7 @@ generate_controller(Name, #{arizona := true}) ->
         "</h1>\"\n",
         "            \"<p>Powered by Nova + Arizona</p></div>\"\n",
         "            \"<script type=\\\"module\\\">\"\n",
-        "            \"import Arizona from '/assets/js/arizona.min.js';\"\n",
+        "            \"import Arizona from '/arizona/js/arizona.min.js';\"\n",
         "            \"globalThis.arizona = new Arizona();\"\n",
         "            \"arizona.connect('/live');\"\n",
         "            \"</script>\"\n",
@@ -1188,7 +1192,7 @@ generate_home_view(Name) ->
     rebar3_nova_utils:write_file(Path, Content).
 
 generate_app_css(Name) ->
-    Path = filename:join([Name, "priv", "assets", "app.css"]),
+    Path = filename:join([Name, "priv", "static", "assets", "app.css"]),
     Content = [
         "* {\n",
         "    margin: 0;\n",
