@@ -626,11 +626,10 @@ generate_router(Name, #{arizona := true}) ->
         "            prefix => \"\",\n",
         "            security => false,\n",
         "            routes => [\n",
-        "                {\"/\", ",
+        "                {\"/\", fun ",
         Name,
-        "_home_view, #{protocol => liveview}},\n",
-        "                {\"/heartbeat\", fun(_) -> {status, 200} end, #{methods => [get]}},\n",
-        "                {\"/assets/[...]\", \"static/assets\"}\n",
+        "_main_controller:index/1, #{methods => [get]}},\n",
+        "                {\"/heartbeat\", fun(_) -> {status, 200} end, #{methods => [get]}}\n",
         "            ]\n",
         "        }\n",
         "    ].\n"
@@ -677,9 +676,38 @@ generate_controller(Name, #{lfe := true}) ->
         "    `#(status 200 #M() \"nova is running!\"))\n"
     ],
     rebar3_nova_utils:write_file(Path, Content);
-generate_controller(_Name, #{arizona := true}) ->
-    %% Arizona views are routed directly, no controller needed
-    ok;
+generate_controller(Name, #{arizona := true}) ->
+    Path = filename:join([Name, "src", "controllers", Name ++ "_main_controller.erl"]),
+    Content = [
+        "-module(",
+        Name,
+        "_main_controller).\n\n",
+        "-export([index/1]).\n\n",
+        "index(_Req) ->\n",
+        "    Html = <<\"<!DOCTYPE html>\"\n",
+        "            \"<html lang=\\\"en\\\">\"\n",
+        "            \"<head>\"\n",
+        "            \"<meta charset=\\\"UTF-8\\\">\"\n",
+        "            \"<meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1.0\\\">\"\n",
+        "            \"<title>",
+        Name,
+        "</title>\"\n",
+        "            \"<link rel=\\\"stylesheet\\\" href=\\\"/assets/css/app.css\\\">\"\n",
+        "            \"</head>\"\n",
+        "            \"<body>\"\n",
+        "            \"<div id=\\\"app\\\"><h1>Welcome to ",
+        Name,
+        "</h1>\"\n",
+        "            \"<p>Powered by Nova + Arizona</p></div>\"\n",
+        "            \"<script type=\\\"module\\\">\"\n",
+        "            \"import Arizona from '/assets/js/arizona.min.js';\"\n",
+        "            \"globalThis.arizona = new Arizona();\"\n",
+        "            \"arizona.connect('/live');\"\n",
+        "            \"</script>\"\n",
+        "            \"</body></html>\">>,\n",
+        "    {status, 200, #{<<\"content-type\">> => <<\"text/html\">>}, Html}.\n"
+    ],
+    rebar3_nova_utils:write_file(Path, Content);
 generate_controller(Name, _Flags) ->
     Path = filename:join([Name, "src", "controllers", Name ++ "_main_controller.erl"]),
     Content = [
