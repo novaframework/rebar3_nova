@@ -186,8 +186,8 @@ rebar_erlydtl_opts(_) ->
 rebar_deps(Flags) ->
     BaseDeps =
         case maps:get(lfe, Flags) of
-            true -> ["    nova,\n", "    {logjam, \"1.2.4\"}"];
-            false -> ["    nova,\n", "    {flatlog, \"0.1.2\"}"]
+            true -> ["    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"chore/upgrade-cowboy\"}}},\n", "    {logjam, \"1.2.4\"}"];
+            false -> ["    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"chore/upgrade-cowboy\"}}},\n", "    {flatlog, \"0.1.2\"}"]
         end,
     KuraDep =
         case maps:get(kura, Flags) of
