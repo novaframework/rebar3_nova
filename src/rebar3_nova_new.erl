@@ -622,10 +622,7 @@ generate_router(Name, #{arizona := true}) ->
         Name,
         "_main_controller:index/1, #{methods => [get]}},\n",
         "                {\"/heartbeat\", fun(_) -> {status, 200} end, #{methods => [get]}},\n",
-        "                %% App static assets (priv/static/assets/)\n",
-        "                {\"/assets/[...]\", \"static/assets\"},\n",
-        "                %% Arizona JS from arizona_core priv\n",
-        "                {\"/arizona/[...]\", {priv_dir, arizona_core, \"static/assets\"}}\n",
+        "                {\"/assets/[...]\", \"static/assets\"}\n",
         "            ]\n",
         "        }\n",
         "    ].\n"
@@ -696,7 +693,7 @@ generate_controller(Name, #{arizona := true}) ->
         "</h1>\"\n",
         "            \"<p>Powered by Nova + Arizona</p></div>\"\n",
         "            \"<script type=\\\"module\\\">\"\n",
-        "            \"import Arizona from '/arizona/js/arizona.min.js';\"\n",
+        "            \"import Arizona from '/assets/js/arizona.min.js';\"\n",
         "            \"globalThis.arizona = new Arizona();\"\n",
         "            \"arizona.connect('/live');\"\n",
         "            \"</script>\"\n",
@@ -1137,7 +1134,8 @@ generate_docker_compose(Name) ->
 
 maybe_generate_arizona(Name, #{arizona := true}) ->
     generate_home_view(Name),
-    generate_app_css(Name);
+    generate_app_css(Name),
+    generate_arizona_copy_script(Name);
 maybe_generate_arizona(_Name, _Flags) ->
     ok.
 
@@ -1216,6 +1214,20 @@ generate_app_css(Name) ->
     ],
     rebar3_nova_utils:write_file(Path, Content).
 
+generate_arizona_copy_script(Name) ->
+    Path = filename:join([Name, "copy_arizona_assets.sh"]),
+    Content = [
+        "#!/bin/sh\n",
+        "# Copy Arizona JS assets from arizona_core dep to app priv\n",
+        "SRC=_build/default/lib/arizona_core/priv/static/assets/js\n",
+        "DEST=priv/static/assets/js\n",
+        "mkdir -p \"$DEST\"\n",
+        "cp \"$SRC/arizona.min.js\" \"$DEST/arizona.min.js\"\n",
+        "echo \"Copied Arizona JS to $DEST\"\n"
+    ],
+    rebar3_nova_utils:write_file(Path, Content),
+    file:change_mode(Path, 8#755).
+
 %%======================================================================
 %% maybe_generate_ci
 %%======================================================================
@@ -1287,6 +1299,13 @@ print_summary(Name, Flags) ->
     case maps:get(kura, Flags) of
         true ->
             rebar_api:info("  rebar3 kura setup~n", []);
+        false ->
+            ok
+    end,
+    case maps:get(arizona, Flags) of
+        true ->
+            rebar_api:info("  rebar3 compile~n", []),
+            rebar_api:info("  ./copy_arizona_assets.sh~n", []);
         false ->
             ok
     end,
