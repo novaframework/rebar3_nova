@@ -981,7 +981,7 @@ generate_tool_versions(Name) ->
     Path = filename:join(Name, ".tool-versions"),
     Content = [
         "erlang 28.0.4\n",
-        "rebar 3.25.0\n"
+        "rebar 3.26.0\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
 
