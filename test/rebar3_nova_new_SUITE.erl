@@ -143,8 +143,9 @@ arizona_flag(_Config) ->
     HomeView = read_file(Name, "src/views/testapp_arizona_home_view.erl"),
     assert_contains(HomeView, "arizona_parse_transform"),
     assert_contains(HomeView, "arizona_view:new(?MODULE"),
-    assert_contains(HomeView, "arizona_template:from_html"),
-    assert_contains(HomeView, "arizona_template:get_binding(message"),
+    assert_contains(HomeView, "arizona_template:from_erl"),
+    assert_contains(HomeView, "layout(Bindings)"),
+    assert_contains(HomeView, "render_slot"),
 
     RebarConfig = read_file(Name, "rebar.config"),
     assert_contains(RebarConfig, "arizona_core"),
@@ -152,8 +153,8 @@ arizona_flag(_Config) ->
     assert_not_contains(RebarConfig, "erlydtl"),
 
     Router = read_file(Name, "src/testapp_arizona_router.erl"),
-    assert_contains(Router, "arizona_nova_adapter"),
-    assert_contains(Router, "ws"),
+    assert_contains(Router, "protocol => liveview"),
+    assert_contains(Router, "_home_view"),
 
     DevConfig = read_file(Name, "config/dev_sys.config.src"),
     assert_contains(DevConfig, "arizona_core"),
@@ -250,7 +251,7 @@ combined_kura_arizona_ci(_Config) ->
     assert_not_contains(RebarConfig, "erlydtl"),
 
     Router = read_file(Name, "src/testapp_combo_router.erl"),
-    assert_contains(Router, "arizona_nova_adapter"),
+    assert_contains(Router, "protocol => liveview"),
 
     SupErl = read_file(Name, "src/testapp_combo_sup.erl"),
     assert_contains(SupErl, "testapp_combo_repo"),

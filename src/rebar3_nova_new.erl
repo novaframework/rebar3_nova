@@ -201,8 +201,13 @@ rebar_deps(Flags) ->
         end,
     ArizonaDeps =
         case maps:get(arizona, Flags) of
-            true -> [",\n    arizona_core,\n    arizona_nova"];
-            false -> []
+            true ->
+                [
+                    ",\n    {arizona_core, {git, \"https://github.com/novaframework/arizona_core.git\", {branch, \"main\"}}}",
+                    ",\n    {arizona_nova, {git, \"https://github.com/novaframework/arizona_nova.git\", {branch, \"main\"}}}"
+                ];
+            false ->
+                []
         end,
     LfeDep =
         case maps:get(lfe, Flags) of
@@ -595,17 +600,11 @@ generate_router(Name, #{arizona := true}) ->
         "            prefix => \"\",\n",
         "            security => false,\n",
         "            routes => [\n",
-        "                {\"/\", fun ",
+        "                {\"/\", ",
         Name,
-        "_main_controller:index/1, #{methods => [get]}},\n",
-        "                {\"/heartbeat\", fun(_) -> {status, 200} end, #{methods => [get]}}\n",
-        "            ]\n",
-        "        },\n",
-        "        #{\n",
-        "            prefix => \"\",\n",
-        "            security => false,\n",
-        "            routes => [\n",
-        "                {\"/ws\", fun arizona_nova_adapter:handler/1, #{protocol => ws}}\n",
+        "_home_view, #{protocol => liveview}},\n",
+        "                {\"/heartbeat\", fun(_) -> {status, 200} end, #{methods => [get]}},\n",
+        "                {\"/assets/[...]\", \"static/assets\"}\n",
         "            ]\n",
         "        }\n",
         "    ].\n"
@@ -652,6 +651,9 @@ generate_controller(Name, #{lfe := true}) ->
         "    `#(status 200 #M() \"nova is running!\"))\n"
     ],
     rebar3_nova_utils:write_file(Path, Content);
+generate_controller(_Name, #{arizona := true}) ->
+    %% Arizona views are routed directly, no controller needed
+    ok;
 generate_controller(Name, _Flags) ->
     Path = filename:join([Name, "src", "controllers", Name ++ "_main_controller.erl"]),
     Content = [
@@ -1048,17 +1050,47 @@ generate_home_view(Name) ->
         "-module(",
         Name,
         "_home_view).\n",
-        "-compile({parse_transform, arizona_parse_transform}).\n",
-        "-behaviour(arizona_view).\n\n",
-        "-export([mount/2, render/1]).\n\n",
-        "mount(_MountArg, _Request) ->\n",
-        "    arizona_view:new(?MODULE, #{message => ~\"Hello from Arizona!\"}, none).\n\n",
+        "-behaviour(arizona_view).\n",
+        "-compile({parse_transform, arizona_parse_transform}).\n\n",
+        "-export([mount/2, layout/1, render/1]).\n\n",
+        "mount(_Arg, Req) ->\n",
+        "    Bindings = #{id => <<\"view\">>, message => <<\"Hello from Arizona!\">>},\n",
+        "    Path = arizona_request:get_path(Req),\n",
+        "    Layout = {?MODULE, layout, main_content, #{active_url => Path}},\n",
+        "    arizona_view:new(?MODULE, Bindings, Layout).\n\n",
+        "layout(Bindings) ->\n",
+        "    arizona_template:from_erl([\n",
+        "        <<\"<!DOCTYPE html>\">>,\n",
+        "        {html, [{lang, <<\"en\">>}], [\n",
+        "            {head, [], [\n",
+        "                {meta, [{charset, <<\"UTF-8\">>}], []},\n",
+        "                {meta, [{name, <<\"viewport\">>},\n",
+        "                        {content, <<\"width=device-width, initial-scale=1.0\">>}], []},\n",
+        "                {title, [], <<\"",
+        Name,
+        "\">>},\n",
+        "                {link, [{rel, <<\"stylesheet\">>}, {href, <<\"/assets/css/app.css\">>}], []},\n",
+        "                {script, [{type, <<\"module\">>}], <<\"\"\"\n",
+        "                import Arizona from '/assets/js/arizona.min.js';\n",
+        "                globalThis.arizona = new Arizona();\n",
+        "                arizona.connect('/live');\n",
+        "                \"\"\">>}\n",
+        "            ]},\n",
+        "            {body, [], [\n",
+        "                arizona_template:render_slot(maps:get(main_content, Bindings))\n",
+        "            ]}\n",
+        "        ]}\n",
+        "    ]).\n\n",
         "render(Bindings) ->\n",
-        "    arizona_template:from_html(~\"\"\"\n",
-        "    <div id=\"app\">\n",
-        "        <h1>{arizona_template:get_binding(message, Bindings)}</h1>\n",
-        "    </div>\n",
-        "    \"\"\").\n"
+        "    arizona_template:from_erl(\n",
+        "        {'div', [{id, arizona_template:get_binding(id, Bindings)},\n",
+        "                 {class, <<\"container\">>}], [\n",
+        "            {h1, [], <<\"Welcome to ",
+        Name,
+        "\">>},\n",
+        "            {p, [{class, <<\"subtitle\">>}], <<\"Powered by Nova + Arizona\">>}\n",
+        "        ]}\n",
+        "    ).\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
 
