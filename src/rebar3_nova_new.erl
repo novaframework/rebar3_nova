@@ -299,8 +299,6 @@ rebar_plugins(Flags) ->
         ErlydtlPlugin,
         LfePlugin,
         KuraPlugin,
-        "    {rebar3_nova, \".*\",\n",
-        "        {git, \"https://github.com/novaframework/rebar3_nova.git\", {branch, \"master\"}}},\n",
         "    {erlfmt, \"~>1.7\"}\n",
         "]}.\n\n"
     ].
