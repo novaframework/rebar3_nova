@@ -17,7 +17,6 @@ init(State) ->
         {example,
             "rebar3 nova new myapp [--kura] [--pgo] [--arizona] [--lfe] [--ci] [--docker] [--otel]"},
         {opts, [
-            {name, $n, "name", string, "Project name"},
             {kura, undefined, "kura", boolean, "Include Kura database layer"},
             {pgo, undefined, "pgo", boolean, "Include PGO PostgreSQL client"},
             {arizona, undefined, "arizona", boolean, "Include Arizona live views"},
@@ -85,15 +84,10 @@ format_error(Reason) ->
 %% Flag parsing
 %%======================================================================
 
-resolve_name(Opts, Args) ->
-    case proplists:get_value(name, Opts) of
-        undefined ->
-            case Args of
-                [N | _] -> {ok, N};
-                _ -> {error, missing_name}
-            end;
-        N ->
-            {ok, N}
+resolve_name(_Opts, Args) ->
+    case Args of
+        [N | _] -> {ok, N};
+        _ -> {error, missing_name}
     end.
 
 parse_flags(Opts) ->
