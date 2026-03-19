@@ -154,7 +154,8 @@ arizona_flag(_Config) ->
     assert_not_contains(RebarConfig, "erlydtl"),
 
     Router = read_file(Name, "src/testapp_arizona_router.erl"),
-    assert_contains(Router, "_main_controller:index/1"),
+    assert_contains(Router, "arizona_nova_live:live("),
+    assert_contains(Router, "arizona_nova_websocket"),
 
     DevConfig = read_file(Name, "config/dev_sys.config.src"),
     assert_contains(DevConfig, "arizona_core"),
@@ -251,7 +252,7 @@ combined_kura_arizona_ci(_Config) ->
     assert_not_contains(RebarConfig, "erlydtl"),
 
     Router = read_file(Name, "src/testapp_combo_router.erl"),
-    assert_contains(Router, "_main_controller:index/1"),
+    assert_contains(Router, "arizona_nova_live:live("),
 
     SupErl = read_file(Name, "src/testapp_combo_sup.erl"),
     assert_contains(SupErl, "supervisor"),
