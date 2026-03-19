@@ -33,8 +33,6 @@ init(State) ->
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
     {Opts, Args} = rebar_state:command_parsed_args(State),
-    rebar_api:debug("nova new: Opts=~p Args=~p", [Opts, Args]),
-    rebar_api:debug("nova new: command_args=~p", [rebar_state:command_args(State)]),
     case resolve_name(Opts, Args) of
         {error, missing_name} ->
             rebar_api:abort(
@@ -86,10 +84,15 @@ format_error(Reason) ->
 %% Flag parsing
 %%======================================================================
 
-resolve_name(_Opts, Args) ->
-    case Args of
-        [N | _] -> {ok, N};
-        _ -> {error, missing_name}
+resolve_name(Opts, Args) ->
+    case proplists:get_value(task, Opts) of
+        undefined ->
+            case Args of
+                [N | _] -> {ok, N};
+                _ -> {error, missing_name}
+            end;
+        Name ->
+            {ok, Name}
     end.
 
 parse_flags(Opts) ->
