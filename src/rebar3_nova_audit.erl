@@ -2,6 +2,16 @@
 
 -export([init/1, do/1, format_error/1]).
 
+-ifdef(TEST).
+-export([
+    is_mutation/1,
+    classify_findings/1,
+    segment_to_binary/2,
+    method_to_binary/1,
+    expand_methods/4
+]).
+-endif.
+
 -include("nova_router.hrl").
 -include_lib("routing_tree/include/routing_tree.hrl").
 

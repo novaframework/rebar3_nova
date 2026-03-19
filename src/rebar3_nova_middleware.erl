@@ -2,6 +2,10 @@
 
 -export([init/1, do/1, format_error/1]).
 
+-ifdef(TEST).
+-export([format_handler/1, format_methods/1]).
+-endif.
+
 -define(PROVIDER, middleware).
 -define(DEPS, [{default, compile}]).
 
