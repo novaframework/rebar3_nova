@@ -319,11 +319,25 @@ rebar_erlfmt(_Flags) ->
         "]}.\n\n"
     ].
 
+rebar_provider_hooks(#{lfe := true, kura := true}) ->
+    [
+        "{provider_hooks, [\n",
+        "    {pre, [{compile, {erlydtl, compile}},\n",
+        "           {compile, {lfe, compile}},\n",
+        "           {compile, {kura, compile}}]}\n",
+        "]}.\n\n"
+    ];
 rebar_provider_hooks(#{lfe := true}) ->
     [
         "{provider_hooks, [\n",
         "    {pre, [{compile, {erlydtl, compile}},\n",
         "           {compile, {lfe, compile}}]}\n",
+        "]}.\n\n"
+    ];
+rebar_provider_hooks(#{kura := true}) ->
+    [
+        "{provider_hooks, [\n",
+        "    {pre, [{compile, {kura, compile}}]}\n",
         "]}.\n\n"
     ];
 rebar_provider_hooks(#{arizona := true}) ->
@@ -431,8 +445,9 @@ generate_app(Name, #{lfe := true}) ->
         "  'ok)\n"
     ],
     rebar3_nova_utils:write_file(Path, Content);
-generate_app(Name, #{otel := true}) ->
+generate_app(Name, Flags) ->
     Path = filename:join([Name, "src", Name ++ "_app.erl"]),
+    StartBody = app_start_body(Name, Flags),
     Content = [
         "-module(",
         Name,
@@ -440,23 +455,7 @@ generate_app(Name, #{otel := true}) ->
         "-behaviour(application).\n\n",
         "-export([start/2, stop/1]).\n\n",
         "start(_StartType, _StartArgs) ->\n",
-        "    opentelemetry:setup(),\n",
-        "    ",
-        Name,
-        "_sup:start_link().\n\n",
-        "stop(_State) ->\n",
-        "    ok.\n"
-    ],
-    rebar3_nova_utils:write_file(Path, Content);
-generate_app(Name, _Flags) ->
-    Path = filename:join([Name, "src", Name ++ "_app.erl"]),
-    Content = [
-        "-module(",
-        Name,
-        "_app).\n\n",
-        "-behaviour(application).\n\n",
-        "-export([start/2, stop/1]).\n\n",
-        "start(_StartType, _StartArgs) ->\n",
+        StartBody,
         "    ",
         Name,
         "_sup:start_link().\n\n",
@@ -464,6 +463,24 @@ generate_app(Name, _Flags) ->
         "    ok.\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
+
+app_start_body(Name, Flags) ->
+    Otel = case maps:get(otel, Flags) of
+        true -> ["    opentelemetry:setup(),\n"];
+        false -> []
+    end,
+    Kura = case maps:get(kura, Flags) of
+        true -> [
+            "    kura_repo_worker:start(",
+            Name,
+            "_repo),\n",
+            "    kura_migrator:migrate(",
+            Name,
+            "_repo),\n"
+        ];
+        false -> []
+    end,
+    [Otel, Kura].
 
 %%======================================================================
 %% sup.erl / sup.lfe
@@ -687,6 +704,7 @@ generate_dev_sys_config(Name, Flags) ->
         "[\n",
         sys_config_kernel(dev, Flags),
         sys_config_nova(Name, dev, Flags),
+        sys_config_app(Name, dev, Flags),
         sys_config_pgo(Name, dev, Flags),
         sys_config_arizona(Name, dev, Flags),
         sys_config_otel(dev, Flags),
@@ -704,6 +722,7 @@ generate_prod_sys_config(Name, Flags) ->
         "%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-\n\n",
         "[\n",
         sys_config_kernel(prod, Flags),
+        sys_config_app(Name, prod, Flags),
         sys_config_nova(Name, prod, Flags),
         sys_config_pgo(Name, prod, Flags),
         sys_config_arizona(Name, prod, Flags),
@@ -795,6 +814,45 @@ sys_config_nova(Name, prod, _Flags) ->
         "     ]}\n",
         " ]},\n"
     ].
+
+sys_config_app(Name, dev, #{kura := true}) ->
+    [
+        " {",
+        Name,
+        ", [\n",
+        "     {",
+        Name,
+        "_repo, #{\n",
+        "         database => <<\"",
+        Name,
+        "_dev\">>,\n",
+        "         hostname => <<\"localhost\">>,\n",
+        "         port => 5432,\n",
+        "         username => <<\"postgres\">>,\n",
+        "         password => <<\"postgres\">>,\n",
+        "         pool_size => 10\n",
+        "     }}\n",
+        " ]},\n"
+    ];
+sys_config_app(Name, prod, #{kura := true}) ->
+    [
+        " {",
+        Name,
+        ", [\n",
+        "     {",
+        Name,
+        "_repo, #{\n",
+        "         database => <<\"${DATABASE_NAME}\">>,\n",
+        "         hostname => <<\"${DATABASE_HOST}\">>,\n",
+        "         port => ${DATABASE_PORT},\n",
+        "         username => <<\"${DATABASE_USER}\">>,\n",
+        "         password => <<\"${DATABASE_PASSWORD}\">>,\n",
+        "         pool_size => ${PGO_POOL_SIZE}\n",
+        "     }}\n",
+        " ]},\n"
+    ];
+sys_config_app(_Name, _Env, _Flags) ->
+    [].
 
 sys_config_pgo(Name, dev, #{kura := true}) ->
     [
