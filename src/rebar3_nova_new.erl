@@ -698,16 +698,19 @@ generate_controller(Name, _Flags) ->
 
 generate_dev_sys_config(Name, Flags) ->
     Path = filename:join([Name, "config", "dev_sys.config.src"]),
-    Content = [
-        "%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-\n\n",
-        "[\n",
+    Sections = [S || S <- [
         sys_config_kernel(dev, Flags),
         sys_config_nova(Name, dev, Flags),
         sys_config_app(Name, dev, Flags),
         sys_config_pgo(Name, dev, Flags),
         sys_config_arizona(Name, dev, Flags),
-        sys_config_otel(dev, Flags),
-        "].\n"
+        sys_config_otel(dev, Flags)
+    ], S =/= []],
+    Content = [
+        "%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-\n\n",
+        "[\n",
+        lists:join(",\n", Sections),
+        "\n].\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
 
@@ -717,16 +720,19 @@ generate_dev_sys_config(Name, Flags) ->
 
 generate_prod_sys_config(Name, Flags) ->
     Path = filename:join([Name, "config", "prod_sys.config.src"]),
-    Content = [
-        "%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-\n\n",
-        "[\n",
+    Sections = [S || S <- [
         sys_config_kernel(prod, Flags),
         sys_config_app(Name, prod, Flags),
         sys_config_nova(Name, prod, Flags),
         sys_config_pgo(Name, prod, Flags),
         sys_config_arizona(Name, prod, Flags),
-        sys_config_otel(prod, Flags),
-        "].\n"
+        sys_config_otel(prod, Flags)
+    ], S =/= []],
+    Content = [
+        "%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-\n\n",
+        "[\n",
+        lists:join(",\n", Sections),
+        "\n].\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
 
@@ -752,7 +758,7 @@ sys_config_kernel(dev, #{lfe := true}) ->
         "           }\n",
         "          }\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_kernel(dev, _Flags) ->
     [
@@ -765,7 +771,7 @@ sys_config_kernel(dev, _Flags) ->
         "         template => [colored_start, \"[\\033[1m\", level, \"\\033[0m\", colored_start,\"] [\", time, \"]\",\n",
         "                      colored_end, \" \", msg, \" (\", mfa, \")\\n\"]\n",
         "     }}}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_kernel(prod, _Flags) ->
     [
@@ -776,7 +782,7 @@ sys_config_kernel(prod, _Flags) ->
         "        #{level => error,\n",
         "          config => #{file => \"log/erlang.log\"}}}\n",
         "      ]}\n",
-        " ]},\n"
+        " ]}"
     ].
 
 sys_config_nova(Name, dev, _Flags) ->
@@ -794,7 +800,7 @@ sys_config_nova(Name, dev, _Flags) ->
         "     {plugins, [\n",
         "         {pre_request, nova_request_plugin, #{decode_json_body => true}}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_nova(Name, prod, _Flags) ->
     [
@@ -811,7 +817,7 @@ sys_config_nova(Name, prod, _Flags) ->
         "     {plugins, [\n",
         "         {pre_request, nova_request_plugin, #{decode_json_body => true}}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ].
 
 sys_config_app(Name, dev, #{kura := true}) ->
@@ -831,7 +837,7 @@ sys_config_app(Name, dev, #{kura := true}) ->
         "         password => <<\"postgres\">>,\n",
         "         pool_size => 10\n",
         "     }}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_app(Name, prod, #{kura := true}) ->
     [
@@ -848,7 +854,7 @@ sys_config_app(Name, prod, #{kura := true}) ->
         "         password => <<\"${DATABASE_PASSWORD}\">>,\n",
         "         pool_size => ${PGO_POOL_SIZE}\n",
         "     }}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_app(_Name, _Env, _Flags) ->
     [].
@@ -868,7 +874,7 @@ sys_config_pgo(Name, dev, #{kura := true}) ->
         "             password => \"postgres\"\n",
         "         }}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_pgo(Name, dev, #{pgo := true}) ->
     [
@@ -885,7 +891,7 @@ sys_config_pgo(Name, dev, #{pgo := true}) ->
         "             password => \"postgres\"\n",
         "         }}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_pgo(Name, prod, #{kura := true}) ->
     [
@@ -902,7 +908,7 @@ sys_config_pgo(Name, prod, #{kura := true}) ->
         "             password => \"${DATABASE_PASSWORD}\"\n",
         "         }}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_pgo(Name, prod, #{pgo := true}) ->
     [
@@ -919,7 +925,7 @@ sys_config_pgo(Name, prod, #{pgo := true}) ->
         "             password => \"${DATABASE_PASSWORD}\"\n",
         "         }}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_pgo(_Name, _Env, _Flags) ->
     [].
@@ -933,7 +939,7 @@ sys_config_arizona(Name, _Env, #{arizona := true}) ->
         "     {endpoint, #{\n",
         "         live_reload => true\n",
         "     }}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_arizona(_Name, _Env, _Flags) ->
     [].
@@ -943,14 +949,14 @@ sys_config_otel(dev, #{otel := true}) ->
         " {opentelemetry, [\n",
         "     {span_processor, simple},\n",
         "     {traces_exporter, {otel_exporter_stdout, []}}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_otel(prod, #{otel := true}) ->
     [
         " {opentelemetry, [\n",
         "     {span_processor, batch},\n",
         "     {traces_exporter, {opentelemetry_exporter, #{endpoints => [\"${OTEL_ENDPOINT}\"]}}}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_otel(_Env, _Flags) ->
     [].
