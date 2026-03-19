@@ -44,9 +44,19 @@ do(State) ->
             dispatch(Type, State, [{name, Name} | Opts]);
         [] ->
             rebar_api:abort(
-                "Missing generator type. Usage: rebar3 nova gen <type> <name>~n"
-                "Available types: ~s",
-                [string:join(maps:keys(generators()), ", ")]
+                "Missing generator type.~n~n"
+                "Usage: rebar3 nova gen <type> <name> [options]~n~n"
+                "Available types:~n"
+                "  controller  Generate a controller module~n"
+                "  resource    Generate controller + schema + routes~n"
+                "  test        Generate a Common Test suite~n"
+                "  auth        Generate email/password authentication~n"
+                "  live        Generate Arizona LiveView CRUD views~n~n"
+                "Examples:~n"
+                "  rebar3 nova gen controller users~n"
+                "  rebar3 nova gen resource users --actions index,show,create~n"
+                "  rebar3 nova gen live users --fields name:string,email:string~n",
+                []
             )
     end.
 
@@ -64,9 +74,10 @@ dispatch(Type, State, MergedOpts) ->
             Module:run(State, MergedOpts);
         error ->
             rebar_api:abort(
-                "Unknown generator type: ~s~n"
-                "Available types: ~s",
-                [Type, string:join(maps:keys(generators()), ", ")]
+                "Unknown generator type: '~s'~n~n"
+                "Available types: controller, resource, test, auth, live~n~n"
+                "Run 'rebar3 nova gen' for usage examples.",
+                [Type]
             )
     end.
 

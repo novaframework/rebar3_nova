@@ -50,10 +50,22 @@ run(State, Args) ->
     case {proplists:get_value(name, Args), proplists:get_value(fields, Args)} of
         {undefined, _} ->
             rebar_api:abort(
-                "Name is required. Usage: rebar3 nova gen live <name> --fields ...", []
+                "Name is required.~n~n"
+                "Usage: rebar3 nova gen live <name> --fields <field:type,...>~n~n"
+                "Example:~n"
+                "  rebar3 nova gen live users --fields name:string,email:string,active:boolean~n~n"
+                "Supported field types: string, text, integer, float, boolean, date, datetime, uuid",
+                []
             );
         {_, undefined} ->
-            rebar_api:abort("--fields is required", []);
+            rebar_api:abort(
+                "--fields is required.~n~n"
+                "Usage: rebar3 nova gen live <name> --fields <field:type,...>~n~n"
+                "Example:~n"
+                "  rebar3 nova gen live users --fields name:string,email:string,active:boolean~n~n"
+                "Supported field types: string, text, integer, float, boolean, date, datetime, uuid",
+                []
+            );
         {Name, FieldsStr} ->
             AppName = rebar3_nova_utils:get_app_name(State),
             AppDir = rebar3_nova_utils:get_app_dir(State),

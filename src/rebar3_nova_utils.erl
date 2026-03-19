@@ -53,9 +53,16 @@ copy_priv_file(PrivRelPath, DestPath) ->
     PrivDir = code:priv_dir(rebar3_nova),
     SrcPath = filename:join(PrivDir, PrivRelPath),
     ok = ensure_dir(DestPath),
-    {ok, _} = file:copy(SrcPath, DestPath),
-    log_info("Created ~s", [DestPath]),
-    ok.
+    case file:copy(SrcPath, DestPath) of
+        {ok, _} ->
+            log_info("Created ~s", [DestPath]),
+            ok;
+        {error, Reason} ->
+            rebar_api:abort(
+                "Could not copy ~s to ~s: ~p",
+                [SrcPath, DestPath, Reason]
+            )
+    end.
 
 -spec parse_actions(string()) -> [atom()].
 parse_actions(Str) ->
@@ -117,8 +124,18 @@ timestamp() ->
 render_template(TemplatePath, Context) ->
     PrivDir = code:priv_dir(rebar3_nova),
     Path = filename:join([PrivDir, "templates" | TemplatePath]),
-    {ok, Template} = file:read_file(Path),
-    bbmustache:render(Template, Context, [{key_type, atom}]).
+    case file:read_file(Path) of
+        {ok, Template} ->
+            bbmustache:render(Template, Context, [{key_type, atom}]);
+        {error, Reason} ->
+            rebar_api:abort(
+                "Could not read template: ~s~n"
+                "Reason: ~p~n"
+                "This may indicate a corrupt or incomplete rebar3_nova installation. "
+                "Try: rm -rf ~/.cache/rebar3/plugins/rebar3_nova && rebar3 compile",
+                [Path, Reason]
+            )
+    end.
 
 %%----------------------------------------------------------------------
 %% Internal
@@ -126,9 +143,31 @@ render_template(TemplatePath, Context) ->
 
 parse_field(Pair) ->
     case string:tokens(Pair, ":") of
-        [Name, Type] -> {string:trim(Name), string:trim(Type)};
-        [Name] -> {string:trim(Name), "string"};
-        _ -> erlang:error({bad_field_spec, Pair})
+        [Name, Type] ->
+            validate_field_type(string:trim(Type)),
+            {string:trim(Name), string:trim(Type)};
+        [Name] ->
+            {string:trim(Name), "string"};
+        _ ->
+            rebar_api:abort(
+                "Invalid field spec: '~s'~n"
+                "Expected format: name:type (e.g., email:string, age:integer)~n"
+                "Supported types: string, integer, float, boolean, date, datetime, text, binary, uuid",
+                [Pair]
+            )
+    end.
+
+validate_field_type(Type) ->
+    ValidTypes = ["string", "integer", "float", "boolean", "date", "datetime",
+                  "text", "binary", "uuid", "bigint", "decimal", "map", "array"],
+    case lists:member(Type, ValidTypes) of
+        true -> ok;
+        false ->
+            rebar_api:warn(
+                "Unknown field type '~s'. Supported types: string, integer, float, "
+                "boolean, date, datetime, text, binary, uuid, bigint, decimal, map, array",
+                [Type]
+            )
     end.
 
 log_info(Fmt, Args) ->

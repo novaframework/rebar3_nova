@@ -34,18 +34,50 @@ init(State) ->
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
     {Opts, Args} = rebar_state:command_parsed_args(State),
-    Name = resolve_name(Opts, Args),
-    Flags = parse_flags(Opts),
-    case validate_flags(Flags) of
-        ok ->
-            generate_project(Name, Flags),
-            print_summary(Name, Flags),
-            {ok, State};
-        {error, Reason} ->
-            {error, Reason}
+    case resolve_name(Opts, Args) of
+        {error, missing_name} ->
+            rebar_api:abort(
+                "Missing project name.~n~n"
+                "Usage: rebar3 nova new <name> [flags]~n~n"
+                "Example:~n"
+                "  rebar3 nova new myapp~n"
+                "  rebar3 nova new myapp --kura --ci~n"
+                "  rebar3 nova new myapp --arizona --docker~n~n"
+                "Flags:~n"
+                "  --kura      Include Kura database layer (PostgreSQL ORM)~n"
+                "  --pgo       Include PGO PostgreSQL client (raw SQL)~n"
+                "  --arizona   Include Arizona live views~n"
+                "  --lfe       Generate LFE source files~n"
+                "  --ci        Generate GitHub Actions CI workflow~n"
+                "  --docker    Generate Dockerfile~n"
+                "  --otel      Include OpenTelemetry instrumentation~n",
+                []
+            );
+        {ok, Name} ->
+            Flags = parse_flags(Opts),
+            case validate_flags(Flags) of
+                ok ->
+                    case filelib:is_dir(Name) of
+                        true ->
+                            rebar_api:abort(
+                                "Directory '~s' already exists. Choose a different name or remove it first.",
+                                [Name]
+                            );
+                        false ->
+                            generate_project(Name, Flags),
+                            print_summary(Name, Flags),
+                            {ok, State}
+                    end;
+                {error, Reason} ->
+                    rebar_api:abort("~s", [Reason])
+            end
     end.
 
 -spec format_error(any()) -> iolist().
+format_error(missing_project_name) ->
+    "Missing project name. Usage: rebar3 nova new <name> [flags]";
+format_error({dir_exists, Name}) ->
+    io_lib:format("Directory '~s' already exists", [Name]);
 format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
@@ -57,11 +89,11 @@ resolve_name(Opts, Args) ->
     case proplists:get_value(name, Opts) of
         undefined ->
             case Args of
-                [N | _] -> N;
-                _ -> error(missing_project_name)
+                [N | _] -> {ok, N};
+                _ -> {error, missing_name}
             end;
         N ->
-            N
+            {ok, N}
     end.
 
 parse_flags(Opts) ->
@@ -85,12 +117,6 @@ validate_flags(_) ->
 %%======================================================================
 
 generate_project(Name, Flags) ->
-    case filelib:is_dir(Name) of
-        true ->
-            error({dir_exists, Name});
-        false ->
-            ok
-    end,
     generate_rebar_config(Name, Flags),
     generate_app_src(Name, Flags),
     generate_app(Name, Flags),

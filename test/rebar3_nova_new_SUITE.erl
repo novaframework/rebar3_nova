@@ -263,13 +263,14 @@ kura_pgo_mutually_exclusive(_Config) ->
     ok.
 
 existing_dir_aborts(_Config) ->
+    %% The dir-exists check is now in do/1 which calls rebar_api:abort.
+    %% Verify that generate_project still works (overwrites) if called directly.
     Name = "testapp_exists",
     ok = file:make_dir(Name),
     Flags = default_flags(),
-    ?assertError(
-        {dir_exists, Name},
-        rebar3_nova_new:generate_project(Name, Flags)
-    ),
+    %% generate_project no longer raises — it just generates into the existing dir
+    rebar3_nova_new:generate_project(Name, Flags),
+    ?assert(filelib:is_regular(filename:join(Name, "rebar.config"))),
     ok.
 
 %%======================================================================

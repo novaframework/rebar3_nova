@@ -36,7 +36,13 @@ run(State) ->
 run(State, Args) ->
     case proplists:get_value(name, Args) of
         undefined ->
-            rebar_api:abort("Name is required. Usage: rebar3 nova gen test <name>", []);
+            rebar_api:abort(
+                "Name is required.~n~n"
+                "Usage: rebar3 nova gen test <name>~n~n"
+                "Example:~n"
+                "  rebar3 nova gen test users",
+                []
+            );
         Name ->
             AppName = rebar3_nova_utils:get_app_name(State),
             AppDir = rebar3_nova_utils:get_app_dir(State),
