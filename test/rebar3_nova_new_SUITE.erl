@@ -101,8 +101,9 @@ kura_flag(_Config) ->
     AppSrc = read_file(Name, "src/testapp_kura.app.src"),
     assert_contains(AppSrc, "kura"),
 
-    SupErl = read_file(Name, "src/testapp_kura_sup.erl"),
-    assert_contains(SupErl, "testapp_kura_repo"),
+    AppErl = read_file(Name, "src/testapp_kura_app.erl"),
+    assert_contains(AppErl, "kura_repo_worker:start(testapp_kura_repo)"),
+    assert_contains(AppErl, "kura_migrator:migrate(testapp_kura_repo)"),
 
     DevConfig = read_file(Name, "config/dev_sys.config.src"),
     assert_contains(DevConfig, "pgo"),
@@ -253,7 +254,7 @@ combined_kura_arizona_ci(_Config) ->
     assert_contains(Router, "_main_controller:index/1"),
 
     SupErl = read_file(Name, "src/testapp_combo_sup.erl"),
-    assert_contains(SupErl, "testapp_combo_repo"),
+    assert_contains(SupErl, "supervisor"),
 
     ok.
 

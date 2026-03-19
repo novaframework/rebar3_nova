@@ -526,15 +526,7 @@ generate_sup(Name, #{kura := true}) ->
         "    supervisor:start_link({local, ?SERVER}, ?MODULE, []).\n\n",
         "init([]) ->\n",
         "    SupFlags = #{strategy => one_for_all},\n",
-        "    ChildSpecs = [\n",
-        "        #{id => ",
-        Name,
-        "_repo,\n",
-        "          start => {",
-        Name,
-        "_repo, start_link, []},\n",
-        "          type => worker}\n",
-        "    ],\n",
+        "    ChildSpecs = [],\n",
         "    {ok, {SupFlags, ChildSpecs}}.\n"
     ],
     rebar3_nova_utils:write_file(Path, Content);
