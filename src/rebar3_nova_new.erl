@@ -300,9 +300,7 @@ rebar_plugins(Flags) ->
         LfePlugin,
         KuraPlugin,
         "    {rebar3_nova, {git, \"https://github.com/Taure/rebar3_nova.git\", {branch, \"feat/unified-gen\"}}},\n",
-        "    {erlfmt, \"~>1.7\"},\n",
-        "    rebar3_audit,\n",
-        "    {rebar3_sbom, {git, \"https://github.com/Taure/rebar3_sbom.git\", {branch, \"feat/include-otp-components\"}}}\n",
+        "    {erlfmt, \"~>1.7\"}\n",
         "]}.\n\n"
     ].
 
