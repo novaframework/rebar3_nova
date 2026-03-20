@@ -1044,6 +1044,7 @@ maybe_generate_view(Name, _Flags) ->
 
 maybe_generate_kura(Name, #{kura := true}) ->
     generate_kura_repo(Name),
+    generate_migrations_dir(Name),
     generate_docker_compose(Name);
 maybe_generate_kura(_Name, _Flags) ->
     ok.
@@ -1061,6 +1062,10 @@ generate_kura_repo(Name) ->
         ".\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
+
+generate_migrations_dir(Name) ->
+    Path = filename:join([Name, "src", "migrations", ".gitkeep"]),
+    rebar3_nova_utils:write_file(Path, "").
 
 %%======================================================================
 %% maybe_generate_pgo
