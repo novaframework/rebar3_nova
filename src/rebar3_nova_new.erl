@@ -186,8 +186,8 @@ rebar_erlydtl_opts(_) ->
 rebar_deps(Flags) ->
     BaseDeps =
         case maps:get(lfe, Flags) of
-            true -> ["    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"chore/upgrade-cowboy\"}}},\n", "    {logjam, \"1.2.4\"}"];
-            false -> ["    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"chore/upgrade-cowboy\"}}},\n", "    {flatlog, \"0.1.2\"}"]
+            true -> ["    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"feat/priv-dir-routes\"}}},\n", "    {logjam, \"1.2.4\"}"];
+            false -> ["    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"feat/priv-dir-routes\"}}},\n", "    {flatlog, \"0.1.2\"}"]
         end,
     KuraDep =
         case maps:get(kura, Flags) of
@@ -623,7 +623,8 @@ generate_router(Name, #{arizona := true}) ->
         "_home_view), #{methods => [get]}},\n",
         "                {\"/heartbeat\", fun(_) -> {status, 200} end, #{methods => [get]}},\n",
         "                {\"/live\", arizona_nova_websocket, #{protocol => ws}},\n",
-        "                {\"/assets/[...]\", \"static/assets\"}\n",
+        "                {\"/assets/[...]\", \"static/assets\"},\n",
+        "                {\"/arizona/[...]\", {arizona_core, \"static/assets\"}}\n",
         "            ]\n",
         "        }\n",
         "    ].\n"
@@ -1135,9 +1136,9 @@ generate_home_view(Name) ->
         "                {title, [], <<\"",
         Name,
         "\">>},\n",
-        "                {link, [{rel, <<\"stylesheet\">>}, {href, <<\"/assets/css/app.css\">>}], []},\n",
+        "                {link, [{rel, <<\"stylesheet\">>}, {href, <<\"/assets/app.css\">>}], []},\n",
         "                {script, [{type, <<\"module\">>}], <<\"\"\"\n",
-        "                import Arizona from '/assets/js/arizona.min.js';\n",
+        "                import Arizona from '/arizona/js/arizona.min.js';\n",
         "                globalThis.arizona = new Arizona();\n",
         "                arizona.connect('/live');\n",
         "                \"\"\">>}\n",
