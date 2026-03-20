@@ -1,0 +1,68 @@
+-module({{{mod}}}).
+-behaviour(kura_schema).
+-include_lib("kura/include/kura.hrl").
+
+-export([table/0, fields/0]).
+-export([registration_changeset/2, password_changeset/2, email_changeset/2]).
+
+table() -> <<"users">>.
+
+fields() ->
+    [#kura_field{name = id, type = id, primary_key = true, nullable = false},
+     #kura_field{name = email, type = string, nullable = false},
+     #kura_field{name = hashed_password, type = string, nullable = false},
+     #kura_field{name = confirmed_at, type = utc_datetime},
+     #kura_field{name = inserted_at, type = utc_datetime},
+     #kura_field{name = updated_at, type = utc_datetime},
+     #kura_field{name = password, type = string, virtual = true},
+     #kura_field{name = password_confirmation, type = string, virtual = true}].
+
+registration_changeset(Data, Params) ->
+    CS = kura_changeset:cast({{{mod}}}, Data, Params,
+             [email, password, password_confirmation]),
+    CS1 = kura_changeset:validate_required(CS, [email, password, password_confirmation]),
+    CS2 = kura_changeset:validate_format(CS1, email, <<"^[^@\\s]+@[^@\\s]+$">>),
+    CS3 = kura_changeset:validate_length(CS2, email, [{max, 160}]),
+    CS4 = kura_changeset:validate_length(CS3, password, [{min, 12}, {max, 72}]),
+    CS5 = validate_password_confirmation(CS4),
+    CS6 = maybe_hash_password(CS5),
+    kura_changeset:unique_constraint(CS6, email).
+
+password_changeset(Data, Params) ->
+    CS = kura_changeset:cast({{{mod}}}, Data, Params,
+             [password, password_confirmation]),
+    CS1 = kura_changeset:validate_required(CS, [password, password_confirmation]),
+    CS2 = kura_changeset:validate_length(CS1, password, [{min, 12}, {max, 72}]),
+    CS3 = validate_password_confirmation(CS2),
+    maybe_hash_password(CS3).
+
+email_changeset(Data, Params) ->
+    CS = kura_changeset:cast({{{mod}}}, Data, Params, [email]),
+    CS1 = kura_changeset:validate_required(CS, [email]),
+    CS2 = kura_changeset:validate_format(CS1, email, <<"^[^@\\s]+@[^@\\s]+$">>),
+    CS3 = kura_changeset:validate_length(CS2, email, [{max, 160}]),
+    kura_changeset:unique_constraint(CS3, email).
+
+%%----------------------------------------------------------------------
+%% Internal
+%%----------------------------------------------------------------------
+
+validate_password_confirmation(CS) ->
+    case {kura_changeset:get_change(CS, password),
+          kura_changeset:get_change(CS, password_confirmation)} of
+        {Pass, Pass} when Pass =/= undefined -> CS;
+        {undefined, _} -> CS;
+        _ -> kura_changeset:add_error(CS, password_confirmation,
+                 <<"does not match password">>)
+    end.
+
+maybe_hash_password(#kura_changeset{valid = true} = CS) ->
+    case kura_changeset:get_change(CS, password) of
+        undefined -> CS;
+        Password ->
+            Hashed = list_to_binary(
+                bcrypt:hashpw(binary_to_list(Password), bcrypt:gen_salt())),
+            kura_changeset:put_change(CS, hashed_password, Hashed)
+    end;
+maybe_hash_password(CS) ->
+    CS.

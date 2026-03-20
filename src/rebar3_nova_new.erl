@@ -17,7 +17,6 @@ init(State) ->
         {example,
             "rebar3 nova new myapp [--kura] [--pgo] [--arizona] [--lfe] [--ci] [--docker] [--otel]"},
         {opts, [
-            {name, $n, "name", string, "Project name"},
             {kura, undefined, "kura", boolean, "Include Kura database layer"},
             {pgo, undefined, "pgo", boolean, "Include PGO PostgreSQL client"},
             {arizona, undefined, "arizona", boolean, "Include Arizona live views"},
@@ -34,18 +33,50 @@ init(State) ->
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
     {Opts, Args} = rebar_state:command_parsed_args(State),
-    Name = resolve_name(Opts, Args),
-    Flags = parse_flags(Opts),
-    case validate_flags(Flags) of
-        ok ->
-            generate_project(Name, Flags),
-            print_summary(Name, Flags),
-            {ok, State};
-        {error, Reason} ->
-            {error, Reason}
+    case resolve_name(Opts, Args) of
+        {error, missing_name} ->
+            rebar_api:abort(
+                "Missing project name.~n~n"
+                "Usage: rebar3 nova new <name> [flags]~n~n"
+                "Example:~n"
+                "  rebar3 nova new myapp~n"
+                "  rebar3 nova new myapp --kura --ci~n"
+                "  rebar3 nova new myapp --arizona --docker~n~n"
+                "Flags:~n"
+                "  --kura      Include Kura database layer (PostgreSQL ORM)~n"
+                "  --pgo       Include PGO PostgreSQL client (raw SQL)~n"
+                "  --arizona   Include Arizona live views~n"
+                "  --lfe       Generate LFE source files~n"
+                "  --ci        Generate GitHub Actions CI workflow~n"
+                "  --docker    Generate Dockerfile~n"
+                "  --otel      Include OpenTelemetry instrumentation~n",
+                []
+            );
+        {ok, Name} ->
+            Flags = parse_flags(Opts),
+            case validate_flags(Flags) of
+                ok ->
+                    case filelib:is_dir(Name) of
+                        true ->
+                            rebar_api:abort(
+                                "Directory '~s' already exists. Choose a different name or remove it first.",
+                                [Name]
+                            );
+                        false ->
+                            generate_project(Name, Flags),
+                            print_summary(Name, Flags),
+                            {ok, State}
+                    end;
+                {error, Reason} ->
+                    rebar_api:abort("~s", [Reason])
+            end
     end.
 
 -spec format_error(any()) -> iolist().
+format_error(missing_project_name) ->
+    "Missing project name. Usage: rebar3 nova new <name> [flags]";
+format_error({dir_exists, Name}) ->
+    io_lib:format("Directory '~s' already exists", [Name]);
 format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
@@ -54,14 +85,14 @@ format_error(Reason) ->
 %%======================================================================
 
 resolve_name(Opts, Args) ->
-    case proplists:get_value(name, Opts) of
+    case proplists:get_value(task, Opts) of
         undefined ->
             case Args of
-                [N | _] -> N;
-                _ -> error(missing_project_name)
+                [N | _] -> {ok, N};
+                _ -> {error, missing_name}
             end;
-        N ->
-            N
+        Name ->
+            {ok, Name}
     end.
 
 parse_flags(Opts) ->
@@ -85,12 +116,6 @@ validate_flags(_) ->
 %%======================================================================
 
 generate_project(Name, Flags) ->
-    case filelib:is_dir(Name) of
-        true ->
-            error({dir_exists, Name});
-        false ->
-            ok
-    end,
     generate_rebar_config(Name, Flags),
     generate_app_src(Name, Flags),
     generate_app(Name, Flags),
@@ -161,8 +186,8 @@ rebar_erlydtl_opts(_) ->
 rebar_deps(Flags) ->
     BaseDeps =
         case maps:get(lfe, Flags) of
-            true -> ["    nova,\n", "    {logjam, \"1.2.4\"}"];
-            false -> ["    nova,\n", "    {flatlog, \"0.1.2\"}"]
+            true -> ["    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"feat/priv-dir-routes\"}}},\n", "    {logjam, \"1.2.4\"}"];
+            false -> ["    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"feat/priv-dir-routes\"}}},\n", "    {flatlog, \"0.1.2\"}"]
         end,
     KuraDep =
         case maps:get(kura, Flags) of
@@ -176,8 +201,13 @@ rebar_deps(Flags) ->
         end,
     ArizonaDeps =
         case maps:get(arizona, Flags) of
-            true -> [",\n    arizona_core,\n    arizona_nova"];
-            false -> []
+            true ->
+                [
+                    ",\n    {arizona_core, {git, \"https://github.com/novaframework/arizona_core.git\", {branch, \"main\"}}}",
+                    ",\n    {arizona_nova, {git, \"https://github.com/novaframework/arizona_nova.git\", {branch, \"main\"}}}"
+                ];
+            false ->
+                []
         end,
     LfeDep =
         case maps:get(lfe, Flags) of
@@ -255,12 +285,21 @@ rebar_plugins(Flags) ->
             false ->
                 []
         end,
+    KuraPlugin =
+        case maps:get(kura, Flags) of
+            true ->
+                [
+                    "    {rebar3_kura, {git, \"https://github.com/Taure/rebar3_kura.git\", {branch, \"main\"}}},\n"
+                ];
+            false ->
+                []
+        end,
     [
         "{project_plugins, [\n",
         ErlydtlPlugin,
         LfePlugin,
-        "    {rebar3_nova, \".*\",\n",
-        "        {git, \"https://github.com/novaframework/rebar3_nova.git\", {branch, \"master\"}}},\n",
+        KuraPlugin,
+        "    {rebar3_nova, {git, \"https://github.com/Taure/rebar3_nova.git\", {branch, \"feat/unified-gen\"}}},\n",
         "    {erlfmt, \"~>1.7\"}\n",
         "]}.\n\n"
     ].
@@ -279,11 +318,25 @@ rebar_erlfmt(_Flags) ->
         "]}.\n\n"
     ].
 
+rebar_provider_hooks(#{lfe := true, kura := true}) ->
+    [
+        "{provider_hooks, [\n",
+        "    {pre, [{compile, {erlydtl, compile}},\n",
+        "           {compile, {lfe, compile}},\n",
+        "           {compile, {kura, compile}}]}\n",
+        "]}.\n\n"
+    ];
 rebar_provider_hooks(#{lfe := true}) ->
     [
         "{provider_hooks, [\n",
         "    {pre, [{compile, {erlydtl, compile}},\n",
         "           {compile, {lfe, compile}}]}\n",
+        "]}.\n\n"
+    ];
+rebar_provider_hooks(#{kura := true}) ->
+    [
+        "{provider_hooks, [\n",
+        "    {pre, [{compile, {kura, compile}}]}\n",
         "]}.\n\n"
     ];
 rebar_provider_hooks(#{arizona := true}) ->
@@ -391,8 +444,9 @@ generate_app(Name, #{lfe := true}) ->
         "  'ok)\n"
     ],
     rebar3_nova_utils:write_file(Path, Content);
-generate_app(Name, #{otel := true}) ->
+generate_app(Name, Flags) ->
     Path = filename:join([Name, "src", Name ++ "_app.erl"]),
+    StartBody = app_start_body(Name, Flags),
     Content = [
         "-module(",
         Name,
@@ -400,23 +454,7 @@ generate_app(Name, #{otel := true}) ->
         "-behaviour(application).\n\n",
         "-export([start/2, stop/1]).\n\n",
         "start(_StartType, _StartArgs) ->\n",
-        "    opentelemetry:setup(),\n",
-        "    ",
-        Name,
-        "_sup:start_link().\n\n",
-        "stop(_State) ->\n",
-        "    ok.\n"
-    ],
-    rebar3_nova_utils:write_file(Path, Content);
-generate_app(Name, _Flags) ->
-    Path = filename:join([Name, "src", Name ++ "_app.erl"]),
-    Content = [
-        "-module(",
-        Name,
-        "_app).\n\n",
-        "-behaviour(application).\n\n",
-        "-export([start/2, stop/1]).\n\n",
-        "start(_StartType, _StartArgs) ->\n",
+        StartBody,
         "    ",
         Name,
         "_sup:start_link().\n\n",
@@ -424,6 +462,24 @@ generate_app(Name, _Flags) ->
         "    ok.\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
+
+app_start_body(Name, Flags) ->
+    Otel = case maps:get(otel, Flags) of
+        true -> ["    opentelemetry:setup(),\n"];
+        false -> []
+    end,
+    Kura = case maps:get(kura, Flags) of
+        true -> [
+            "    kura_repo_worker:start(",
+            Name,
+            "_repo),\n",
+            "    kura_migrator:migrate(",
+            Name,
+            "_repo),\n"
+        ];
+        false -> []
+    end,
+    [Otel, Kura].
 
 %%======================================================================
 %% sup.erl / sup.lfe
@@ -470,15 +526,7 @@ generate_sup(Name, #{kura := true}) ->
         "    supervisor:start_link({local, ?SERVER}, ?MODULE, []).\n\n",
         "init([]) ->\n",
         "    SupFlags = #{strategy => one_for_all},\n",
-        "    ChildSpecs = [\n",
-        "        #{id => ",
-        Name,
-        "_repo,\n",
-        "          start => {",
-        Name,
-        "_repo, start_link, []},\n",
-        "          type => worker}\n",
-        "    ],\n",
+        "    ChildSpecs = [],\n",
         "    {ok, {SupFlags, ChildSpecs}}.\n"
     ],
     rebar3_nova_utils:write_file(Path, Content);
@@ -570,17 +618,13 @@ generate_router(Name, #{arizona := true}) ->
         "            prefix => \"\",\n",
         "            security => false,\n",
         "            routes => [\n",
-        "                {\"/\", fun ",
+        "                {\"/\", arizona_nova_live:live(",
         Name,
-        "_main_controller:index/1, #{methods => [get]}},\n",
-        "                {\"/heartbeat\", fun(_) -> {status, 200} end, #{methods => [get]}}\n",
-        "            ]\n",
-        "        },\n",
-        "        #{\n",
-        "            prefix => \"\",\n",
-        "            security => false,\n",
-        "            routes => [\n",
-        "                {\"/ws\", fun arizona_nova_adapter:handler/1, #{protocol => ws}}\n",
+        "_home_view), #{methods => [get]}},\n",
+        "                {\"/heartbeat\", fun(_) -> {status, 200} end, #{methods => [get]}},\n",
+        "                {\"/live\", arizona_nova_websocket, #{protocol => ws}},\n",
+        "                {\"/assets/[...]\", \"static/assets\"},\n",
+        "                {\"/arizona/[...]\", {arizona_core, \"static/assets\"}}\n",
         "            ]\n",
         "        }\n",
         "    ].\n"
@@ -627,6 +671,9 @@ generate_controller(Name, #{lfe := true}) ->
         "    `#(status 200 #M() \"nova is running!\"))\n"
     ],
     rebar3_nova_utils:write_file(Path, Content);
+generate_controller(_Name, #{arizona := true}) ->
+    %% No controller needed — arizona_nova_live:live/1 handles rendering
+    ok;
 generate_controller(Name, _Flags) ->
     Path = filename:join([Name, "src", "controllers", Name ++ "_main_controller.erl"]),
     Content = [
@@ -645,15 +692,19 @@ generate_controller(Name, _Flags) ->
 
 generate_dev_sys_config(Name, Flags) ->
     Path = filename:join([Name, "config", "dev_sys.config.src"]),
+    Sections = [S || S <- [
+        sys_config_kernel(dev, Flags),
+        sys_config_nova(Name, dev, Flags),
+        sys_config_app(Name, dev, Flags),
+        sys_config_pgo(Name, dev, Flags),
+        sys_config_arizona(Name, dev, Flags),
+        sys_config_otel(dev, Flags)
+    ], S =/= []],
     Content = [
         "%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-\n\n",
         "[\n",
-        sys_config_kernel(dev, Flags),
-        sys_config_nova(Name, dev, Flags),
-        sys_config_pgo(Name, dev, Flags),
-        sys_config_arizona(Name, dev, Flags),
-        sys_config_otel(dev, Flags),
-        "].\n"
+        lists:join(",\n", Sections),
+        "\n].\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
 
@@ -663,15 +714,19 @@ generate_dev_sys_config(Name, Flags) ->
 
 generate_prod_sys_config(Name, Flags) ->
     Path = filename:join([Name, "config", "prod_sys.config.src"]),
-    Content = [
-        "%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-\n\n",
-        "[\n",
+    Sections = [S || S <- [
         sys_config_kernel(prod, Flags),
+        sys_config_app(Name, prod, Flags),
         sys_config_nova(Name, prod, Flags),
         sys_config_pgo(Name, prod, Flags),
         sys_config_arizona(Name, prod, Flags),
-        sys_config_otel(prod, Flags),
-        "].\n"
+        sys_config_otel(prod, Flags)
+    ], S =/= []],
+    Content = [
+        "%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-\n\n",
+        "[\n",
+        lists:join(",\n", Sections),
+        "\n].\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
 
@@ -697,7 +752,7 @@ sys_config_kernel(dev, #{lfe := true}) ->
         "           }\n",
         "          }\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_kernel(dev, _Flags) ->
     [
@@ -710,7 +765,7 @@ sys_config_kernel(dev, _Flags) ->
         "         template => [colored_start, \"[\\033[1m\", level, \"\\033[0m\", colored_start,\"] [\", time, \"]\",\n",
         "                      colored_end, \" \", msg, \" (\", mfa, \")\\n\"]\n",
         "     }}}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_kernel(prod, _Flags) ->
     [
@@ -721,7 +776,7 @@ sys_config_kernel(prod, _Flags) ->
         "        #{level => error,\n",
         "          config => #{file => \"log/erlang.log\"}}}\n",
         "      ]}\n",
-        " ]},\n"
+        " ]}"
     ].
 
 sys_config_nova(Name, dev, _Flags) ->
@@ -739,7 +794,7 @@ sys_config_nova(Name, dev, _Flags) ->
         "     {plugins, [\n",
         "         {pre_request, nova_request_plugin, #{decode_json_body => true}}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_nova(Name, prod, _Flags) ->
     [
@@ -756,8 +811,47 @@ sys_config_nova(Name, prod, _Flags) ->
         "     {plugins, [\n",
         "         {pre_request, nova_request_plugin, #{decode_json_body => true}}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ].
+
+sys_config_app(Name, dev, #{kura := true}) ->
+    [
+        " {",
+        Name,
+        ", [\n",
+        "     {",
+        Name,
+        "_repo, #{\n",
+        "         database => <<\"",
+        Name,
+        "_dev\">>,\n",
+        "         hostname => <<\"localhost\">>,\n",
+        "         port => 5432,\n",
+        "         username => <<\"postgres\">>,\n",
+        "         password => <<\"postgres\">>,\n",
+        "         pool_size => 10\n",
+        "     }}\n",
+        " ]}"
+    ];
+sys_config_app(Name, prod, #{kura := true}) ->
+    [
+        " {",
+        Name,
+        ", [\n",
+        "     {",
+        Name,
+        "_repo, #{\n",
+        "         database => <<\"${DATABASE_NAME}\">>,\n",
+        "         hostname => <<\"${DATABASE_HOST}\">>,\n",
+        "         port => ${DATABASE_PORT},\n",
+        "         username => <<\"${DATABASE_USER}\">>,\n",
+        "         password => <<\"${DATABASE_PASSWORD}\">>,\n",
+        "         pool_size => ${PGO_POOL_SIZE}\n",
+        "     }}\n",
+        " ]}"
+    ];
+sys_config_app(_Name, _Env, _Flags) ->
+    [].
 
 sys_config_pgo(Name, dev, #{kura := true}) ->
     [
@@ -774,7 +868,7 @@ sys_config_pgo(Name, dev, #{kura := true}) ->
         "             password => \"postgres\"\n",
         "         }}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_pgo(Name, dev, #{pgo := true}) ->
     [
@@ -791,7 +885,7 @@ sys_config_pgo(Name, dev, #{pgo := true}) ->
         "             password => \"postgres\"\n",
         "         }}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_pgo(Name, prod, #{kura := true}) ->
     [
@@ -808,7 +902,7 @@ sys_config_pgo(Name, prod, #{kura := true}) ->
         "             password => \"${DATABASE_PASSWORD}\"\n",
         "         }}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_pgo(Name, prod, #{pgo := true}) ->
     [
@@ -825,7 +919,7 @@ sys_config_pgo(Name, prod, #{pgo := true}) ->
         "             password => \"${DATABASE_PASSWORD}\"\n",
         "         }}\n",
         "     ]}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_pgo(_Name, _Env, _Flags) ->
     [].
@@ -839,7 +933,7 @@ sys_config_arizona(Name, _Env, #{arizona := true}) ->
         "     {endpoint, #{\n",
         "         live_reload => true\n",
         "     }}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_arizona(_Name, _Env, _Flags) ->
     [].
@@ -849,14 +943,14 @@ sys_config_otel(dev, #{otel := true}) ->
         " {opentelemetry, [\n",
         "     {span_processor, simple},\n",
         "     {traces_exporter, {otel_exporter_stdout, []}}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_otel(prod, #{otel := true}) ->
     [
         " {opentelemetry, [\n",
         "     {span_processor, batch},\n",
         "     {traces_exporter, {opentelemetry_exporter, #{endpoints => [\"${OTEL_ENDPOINT}\"]}}}\n",
-        " ]},\n"
+        " ]}"
     ];
 sys_config_otel(_Env, _Flags) ->
     [].
@@ -887,7 +981,7 @@ generate_tool_versions(Name) ->
     Path = filename:join(Name, ".tool-versions"),
     Content = [
         "erlang 28.0.4\n",
-        "rebar 3.25.0\n"
+        "rebar 3.26.0\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
 
@@ -950,6 +1044,7 @@ maybe_generate_view(Name, _Flags) ->
 
 maybe_generate_kura(Name, #{kura := true}) ->
     generate_kura_repo(Name),
+    generate_migrations_dir(Name),
     generate_docker_compose(Name);
 maybe_generate_kura(_Name, _Flags) ->
     ok.
@@ -967,6 +1062,10 @@ generate_kura_repo(Name) ->
         ".\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
+
+generate_migrations_dir(Name) ->
+    Path = filename:join([Name, "src", "migrations", ".gitkeep"]),
+    rebar3_nova_utils:write_file(Path, "").
 
 %%======================================================================
 %% maybe_generate_pgo
@@ -1022,22 +1121,53 @@ generate_home_view(Name) ->
     Content = [
         "-module(",
         Name,
-        "_home_view).\n\n",
-        "-behaviour(arizona_view).\n\n",
-        "-export([mount/2, render/1]).\n\n",
-        "mount(_Params, State) ->\n",
-        "    {ok, arizona_state:put_assign(message, <<\"Hello from Arizona!\">>, State)}.\n\n",
-        "render(State) ->\n",
-        "    {ok, <<\"\n",
-        "        <div id=\\\"app\\\">\n",
-        "            <h1>{@message}</h1>\n",
-        "        </div>\n",
-        "    \">>, State}.\n"
+        "_home_view).\n",
+        "-behaviour(arizona_view).\n",
+        "-compile({parse_transform, arizona_parse_transform}).\n\n",
+        "-export([mount/2, layout/1, render/1]).\n\n",
+        "mount(_Arg, Req) ->\n",
+        "    Bindings = #{id => <<\"view\">>, message => <<\"Hello from Arizona!\">>},\n",
+        "    Path = arizona_request:get_path(Req),\n",
+        "    Layout = {?MODULE, layout, main_content, #{active_url => Path}},\n",
+        "    arizona_view:new(?MODULE, Bindings, Layout).\n\n",
+        "layout(Bindings) ->\n",
+        "    arizona_template:from_erl([\n",
+        "        <<\"<!DOCTYPE html>\">>,\n",
+        "        {html, [{lang, <<\"en\">>}], [\n",
+        "            {head, [], [\n",
+        "                {meta, [{charset, <<\"UTF-8\">>}], []},\n",
+        "                {meta, [{name, <<\"viewport\">>},\n",
+        "                        {content, <<\"width=device-width, initial-scale=1.0\">>}], []},\n",
+        "                {title, [], <<\"",
+        Name,
+        "\">>},\n",
+        "                {link, [{rel, <<\"stylesheet\">>}, {href, <<\"/assets/app.css\">>}], []},\n",
+        "                {script, [{type, <<\"module\">>}], <<\"\"\"\n",
+        "                import Arizona from '/arizona/js/arizona.min.js';\n",
+        "                globalThis.arizona = new Arizona();\n",
+        "                arizona.connect('/live');\n",
+        "                \"\"\">>}\n",
+        "            ]},\n",
+        "            {body, [], [\n",
+        "                arizona_template:render_slot(maps:get(main_content, Bindings))\n",
+        "            ]}\n",
+        "        ]}\n",
+        "    ]).\n\n",
+        "render(Bindings) ->\n",
+        "    arizona_template:from_erl(\n",
+        "        {'div', [{id, arizona_template:get_binding(id, Bindings)},\n",
+        "                 {class, <<\"container\">>}], [\n",
+        "            {h1, [], <<\"Welcome to ",
+        Name,
+        "\">>},\n",
+        "            {p, [{class, <<\"subtitle\">>}], <<\"Powered by Nova + Arizona\">>}\n",
+        "        ]}\n",
+        "    ).\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
 
 generate_app_css(Name) ->
-    Path = filename:join([Name, "priv", "assets", "app.css"]),
+    Path = filename:join([Name, "priv", "static", "assets", "app.css"]),
     Content = [
         "* {\n",
         "    margin: 0;\n",
@@ -1126,12 +1256,6 @@ print_summary(Name, Flags) ->
     case NeedsDb of
         true ->
             rebar_api:info("  docker compose up -d~n", []);
-        false ->
-            ok
-    end,
-    case maps:get(kura, Flags) of
-        true ->
-            rebar_api:info("  rebar3 kura setup~n", []);
         false ->
             ok
     end,
