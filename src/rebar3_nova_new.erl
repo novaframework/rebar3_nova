@@ -1259,10 +1259,4 @@ print_summary(Name, Flags) ->
         false ->
             ok
     end,
-    case maps:get(kura, Flags) of
-        true ->
-            rebar_api:info("  rebar3 kura setup~n", []);
-        false ->
-            ok
-    end,
     rebar_api:info("  rebar3 nova serve~n", []).
