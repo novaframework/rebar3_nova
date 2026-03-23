@@ -158,10 +158,24 @@ parse_field(Pair) ->
     end.
 
 validate_field_type(Type) ->
-    ValidTypes = ["string", "integer", "float", "boolean", "date", "datetime",
-                  "text", "binary", "uuid", "bigint", "decimal", "map", "array"],
+    ValidTypes = [
+        "string",
+        "integer",
+        "float",
+        "boolean",
+        "date",
+        "datetime",
+        "text",
+        "binary",
+        "uuid",
+        "bigint",
+        "decimal",
+        "map",
+        "array"
+    ],
     case lists:member(Type, ValidTypes) of
-        true -> ok;
+        true ->
+            ok;
         false ->
             rebar_api:warn(
                 "Unknown field type '~s'. Supported types: string, integer, float, "

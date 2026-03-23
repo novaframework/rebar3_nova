@@ -186,8 +186,16 @@ rebar_erlydtl_opts(_) ->
 rebar_deps(Flags) ->
     BaseDeps =
         case maps:get(lfe, Flags) of
-            true -> ["    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"feat/priv-dir-routes\"}}},\n", "    {logjam, \"1.2.4\"}"];
-            false -> ["    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"feat/priv-dir-routes\"}}},\n", "    {flatlog, \"0.1.2\"}"]
+            true ->
+                [
+                    "    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"feat/priv-dir-routes\"}}},\n",
+                    "    {logjam, \"1.2.4\"}"
+                ];
+            false ->
+                [
+                    "    {nova, {git, \"https://github.com/novaframework/nova.git\", {branch, \"feat/priv-dir-routes\"}}},\n",
+                    "    {flatlog, \"0.1.2\"}"
+                ]
         end,
     KuraDep =
         case maps:get(kura, Flags) of
@@ -464,21 +472,25 @@ generate_app(Name, Flags) ->
     rebar3_nova_utils:write_file(Path, Content).
 
 app_start_body(Name, Flags) ->
-    Otel = case maps:get(otel, Flags) of
-        true -> ["    opentelemetry:setup(),\n"];
-        false -> []
-    end,
-    Kura = case maps:get(kura, Flags) of
-        true -> [
-            "    kura_repo_worker:start(",
-            Name,
-            "_repo),\n",
-            "    kura_migrator:migrate(",
-            Name,
-            "_repo),\n"
-        ];
-        false -> []
-    end,
+    Otel =
+        case maps:get(otel, Flags) of
+            true -> ["    opentelemetry:setup(),\n"];
+            false -> []
+        end,
+    Kura =
+        case maps:get(kura, Flags) of
+            true ->
+                [
+                    "    kura_repo_worker:start(",
+                    Name,
+                    "_repo),\n",
+                    "    kura_migrator:migrate(",
+                    Name,
+                    "_repo),\n"
+                ];
+            false ->
+                []
+        end,
     [Otel, Kura].
 
 %%======================================================================
@@ -692,14 +704,18 @@ generate_controller(Name, _Flags) ->
 
 generate_dev_sys_config(Name, Flags) ->
     Path = filename:join([Name, "config", "dev_sys.config.src"]),
-    Sections = [S || S <- [
-        sys_config_kernel(dev, Flags),
-        sys_config_nova(Name, dev, Flags),
-        sys_config_app(Name, dev, Flags),
-        sys_config_pgo(Name, dev, Flags),
-        sys_config_arizona(Name, dev, Flags),
-        sys_config_otel(dev, Flags)
-    ], S =/= []],
+    Sections = [
+        S
+     || S <- [
+            sys_config_kernel(dev, Flags),
+            sys_config_nova(Name, dev, Flags),
+            sys_config_app(Name, dev, Flags),
+            sys_config_pgo(Name, dev, Flags),
+            sys_config_arizona(Name, dev, Flags),
+            sys_config_otel(dev, Flags)
+        ],
+        S =/= []
+    ],
     Content = [
         "%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-\n\n",
         "[\n",
@@ -714,14 +730,18 @@ generate_dev_sys_config(Name, Flags) ->
 
 generate_prod_sys_config(Name, Flags) ->
     Path = filename:join([Name, "config", "prod_sys.config.src"]),
-    Sections = [S || S <- [
-        sys_config_kernel(prod, Flags),
-        sys_config_app(Name, prod, Flags),
-        sys_config_nova(Name, prod, Flags),
-        sys_config_pgo(Name, prod, Flags),
-        sys_config_arizona(Name, prod, Flags),
-        sys_config_otel(prod, Flags)
-    ], S =/= []],
+    Sections = [
+        S
+     || S <- [
+            sys_config_kernel(prod, Flags),
+            sys_config_app(Name, prod, Flags),
+            sys_config_nova(Name, prod, Flags),
+            sys_config_pgo(Name, prod, Flags),
+            sys_config_arizona(Name, prod, Flags),
+            sys_config_otel(prod, Flags)
+        ],
+        S =/= []
+    ],
     Content = [
         "%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-\n\n",
         "[\n",
