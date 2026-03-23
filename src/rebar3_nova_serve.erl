@@ -16,6 +16,10 @@
     flush/0
 ]).
 
+-ifdef(TEST).
+-export([is_routefile/1]).
+-endif.
+
 -define(PROVIDER, serve).
 -define(DEPS, [{default, compile}]).
 

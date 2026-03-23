@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  ci:
+    uses: Taure/erlang-ci/.github/workflows/ci.yml@v1
+    with:
+      enable-dependency-submission: true
+      enable-summary: true
+      enable-sbom-scan: true
+      enable-sbom: true
+      enable-coverage: true
+      enable-audit: true
+      enable-eunit: false
+      enable-fmt: false
+      enable-xref: false
+      enable-dialyzer: false

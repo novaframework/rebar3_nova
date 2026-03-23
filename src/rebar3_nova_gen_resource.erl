@@ -1,6 +1,6 @@
 -module(rebar3_nova_gen_resource).
 
--export([init/1, do/1, format_error/1]).
+-export([init/1, do/1, run/1, run/2, format_error/1]).
 
 -define(PROVIDER, gen_resource).
 -define(DEPS, [{default, compile}]).
@@ -19,7 +19,8 @@ init(State) ->
             {actions, $a, "actions", {string, "list,show,create,update,delete"},
                 "Comma-separated actions"}
         ]},
-        {short_desc, "Generate controller, schema, and route hints"},
+        {short_desc,
+            "Generate controller, schema, and route hints (deprecated: use `rebar3 nova gen resource`)"},
         {desc,
             "Generates a controller, JSON schema, and prints route snippets to add to your router"}
     ]),
@@ -27,10 +28,30 @@ init(State) ->
 
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
+    rebar_api:warn(
+        "gen_resource is deprecated. Use `rebar3 nova gen resource` instead.", []
+    ),
+    run(State).
+
+-spec run(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
+run(State) ->
     {Args, _} = rebar_state:command_parsed_args(State),
+    run(State, Args).
+
+-spec run(rebar_state:t(), proplists:proplist()) -> {ok, rebar_state:t()} | {error, string()}.
+run(State, Args) ->
     case proplists:get_value(name, Args) of
         undefined ->
-            rebar_api:abort("--name is required", []);
+            rebar_api:abort(
+                "Name is required.~n~n"
+                "Usage: rebar3 nova gen resource <name> [options]~n~n"
+                "Options:~n"
+                "  --actions  Comma-separated actions (default: list,show,create,update,delete)~n~n"
+                "Example:~n"
+                "  rebar3 nova gen resource users~n"
+                "  rebar3 nova gen resource posts --actions list,show,create",
+                []
+            );
         Name ->
             AppName = rebar3_nova_utils:get_app_name(State),
             AppDir = rebar3_nova_utils:get_app_dir(State),
@@ -47,7 +68,7 @@ format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
 generate_schema(AppDir, Name) ->
-    Singular = singularize(Name),
+    Singular = rebar3_nova_utils:singularize(Name),
     SchemaFile = filename:join([AppDir, "priv", "schemas", Singular ++ ".json"]),
     Schema = #{
         <<"$schema">> => <<"http://json-schema.org/draft-07/schema#">>,
@@ -58,7 +79,7 @@ generate_schema(AppDir, Name) ->
         },
         <<"required">> => [<<"id">>, <<"name">>]
     },
-    Json = thoas:encode(Schema),
+    Json = json:encode(Schema),
     rebar3_nova_utils:write_file_if_not_exists(SchemaFile, Json).
 
 print_route_hints(AppName, Name, Actions) ->
@@ -91,9 +112,3 @@ print_route_hints(AppName, Name, Actions) ->
         end,
         Actions
     ).
-
-singularize(Name) ->
-    case lists:reverse(Name) of
-        [$s | Rest] -> lists:reverse(Rest);
-        _ -> Name
-    end.

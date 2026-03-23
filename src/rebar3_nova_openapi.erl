@@ -2,6 +2,20 @@
 
 -export([init/1, do/1, format_error/1]).
 
+-ifdef(TEST).
+-export([
+    build_spec/4,
+    build_paths/1,
+    extract_path_params/1,
+    schema_ref/1,
+    maybe_add_request_body/3,
+    maybe_add_response_schema/3,
+    segment_to_binary/2,
+    method_to_binary/1,
+    swagger_html/1
+]).
+-endif.
+
 -include("nova_router.hrl").
 -include_lib("routing_tree/include/routing_tree.hrl").
 
@@ -55,7 +69,7 @@ do(State) ->
     Schemas = load_schemas(AppDir),
 
     Spec = build_spec(Title, ApiVersion, Routes, Schemas),
-    Json = thoas:encode(Spec),
+    Json = json:encode(Spec),
 
     ok = filelib:ensure_dir(Output),
     ok = file:write_file(Output, Json),
@@ -170,13 +184,14 @@ load_schemas(AppDir) ->
                         FullPath = filename:join(SchemaDir, File),
                         case file:read_file(FullPath) of
                             {ok, Bin} ->
-                                case thoas:decode(Bin) of
-                                    {ok, Decoded} ->
+                                try json:decode(Bin) of
+                                    Decoded ->
                                         Name = erlang:list_to_binary(
                                             filename:basename(File, ".json")
                                         ),
-                                        {true, {Name, Decoded}};
-                                    {error, _} ->
+                                        {true, {Name, Decoded}}
+                                catch
+                                    _:_ ->
                                         rebar_api:warn("Failed to parse schema: ~s", [File]),
                                         false
                                 end;

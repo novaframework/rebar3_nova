@@ -1,0 +1,15 @@
+{{=<% %>=}}
+-module(<%mod%>).
+
+-export([create/1]).
+
+create(Req) ->
+    Params = maps:get(json, Req),
+    case <%accounts%>:register_user(Params) of
+        {ok, User} ->
+            {ok, Token} = <%accounts%>:generate_session_token(User),
+            ok = nova_session:set(Req, <<"session_token">>, Token),
+            {json, 201, #{}, #{<<"user">> => <%accounts%>:user_to_json(User)}};
+        {error, CS} ->
+            {json, 422, #{}, #{<<"errors">> => <%accounts%>:format_errors(CS)}}
+    end.

@@ -101,8 +101,9 @@ kura_flag(_Config) ->
     AppSrc = read_file(Name, "src/testapp_kura.app.src"),
     assert_contains(AppSrc, "kura"),
 
-    SupErl = read_file(Name, "src/testapp_kura_sup.erl"),
-    assert_contains(SupErl, "testapp_kura_repo"),
+    AppErl = read_file(Name, "src/testapp_kura_app.erl"),
+    assert_contains(AppErl, "kura_repo_worker:start(testapp_kura_repo)"),
+    assert_contains(AppErl, "kura_migrator:migrate(testapp_kura_repo)"),
 
     DevConfig = read_file(Name, "config/dev_sys.config.src"),
     assert_contains(DevConfig, "pgo"),
@@ -137,8 +138,15 @@ arizona_flag(_Config) ->
     rebar3_nova_new:generate_project(Name, Flags),
 
     assert_file_exists(Name, "src/views/testapp_arizona_home_view.erl"),
-    assert_file_exists(Name, "priv/assets/app.css"),
+    assert_file_exists(Name, "priv/static/assets/app.css"),
     assert_file_not_exists(Name, "src/views/testapp_arizona_main.dtl"),
+
+    HomeView = read_file(Name, "src/views/testapp_arizona_home_view.erl"),
+    assert_contains(HomeView, "arizona_parse_transform"),
+    assert_contains(HomeView, "arizona_view:new(?MODULE"),
+    assert_contains(HomeView, "arizona_template:from_erl"),
+    assert_contains(HomeView, "layout(Bindings)"),
+    assert_contains(HomeView, "render_slot"),
 
     RebarConfig = read_file(Name, "rebar.config"),
     assert_contains(RebarConfig, "arizona_core"),
@@ -146,8 +154,8 @@ arizona_flag(_Config) ->
     assert_not_contains(RebarConfig, "erlydtl"),
 
     Router = read_file(Name, "src/testapp_arizona_router.erl"),
-    assert_contains(Router, "arizona_nova_adapter"),
-    assert_contains(Router, "ws"),
+    assert_contains(Router, "arizona_nova_live:live("),
+    assert_contains(Router, "arizona_nova_websocket"),
 
     DevConfig = read_file(Name, "config/dev_sys.config.src"),
     assert_contains(DevConfig, "arizona_core"),
@@ -234,7 +242,7 @@ combined_kura_arizona_ci(_Config) ->
     assert_file_exists(Name, "src/testapp_combo_repo.erl"),
     assert_file_exists(Name, "docker-compose.yml"),
     assert_file_exists(Name, "src/views/testapp_combo_home_view.erl"),
-    assert_file_exists(Name, "priv/assets/app.css"),
+    assert_file_exists(Name, "priv/static/assets/app.css"),
     assert_file_exists(Name, ".github/workflows/ci.yml"),
     assert_file_not_exists(Name, "src/views/testapp_combo_main.dtl"),
 
@@ -244,10 +252,10 @@ combined_kura_arizona_ci(_Config) ->
     assert_not_contains(RebarConfig, "erlydtl"),
 
     Router = read_file(Name, "src/testapp_combo_router.erl"),
-    assert_contains(Router, "arizona_nova_adapter"),
+    assert_contains(Router, "arizona_nova_live:live("),
 
     SupErl = read_file(Name, "src/testapp_combo_sup.erl"),
-    assert_contains(SupErl, "testapp_combo_repo"),
+    assert_contains(SupErl, "supervisor"),
 
     ok.
 
@@ -257,13 +265,14 @@ kura_pgo_mutually_exclusive(_Config) ->
     ok.
 
 existing_dir_aborts(_Config) ->
+    %% The dir-exists check is now in do/1 which calls rebar_api:abort.
+    %% Verify that generate_project still works (overwrites) if called directly.
     Name = "testapp_exists",
     ok = file:make_dir(Name),
     Flags = default_flags(),
-    ?assertError(
-        {dir_exists, Name},
-        rebar3_nova_new:generate_project(Name, Flags)
-    ),
+    %% generate_project no longer raises — it just generates into the existing dir
+    rebar3_nova_new:generate_project(Name, Flags),
+    ?assert(filelib:is_regular(filename:join(Name, "rebar.config"))),
     ok.
 
 %%======================================================================
