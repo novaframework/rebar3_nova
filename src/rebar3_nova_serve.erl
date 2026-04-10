@@ -12,7 +12,7 @@
 ]).
 
 -export([
-    auto/0,
+    auto/1,
     flush/0
 ]).
 
@@ -69,7 +69,7 @@ format_error(Reason) ->
 do(State) ->
     spawn(fun() ->
         listen_on_project_apps(State),
-        ?MODULE:auto()
+        ?MODULE:auto(State)
     end),
     State1 = remove_from_plugin_paths(State),
     rebar_prv_shell:do(State1).
@@ -79,7 +79,7 @@ do(State) ->
     <<"^(.*)?\.dtl$">>
 ]).
 
-auto() ->
+auto(State) ->
     receive
         {ChangedFile, _Events} ->
             Ext = filename:extension(unicode:characters_to_binary(ChangedFile)),
@@ -103,10 +103,10 @@ auto() ->
                     timer:sleep(200),
                     flush(),
                     %%rebar_agent:do(compile)
-                    compile_file(Ext, ChangedFile)
+                    compile_file(Ext, ChangedFile, State)
             end
     end,
-    ?MODULE:auto().
+    ?MODULE:auto(State).
 
 flush() ->
     receive
@@ -154,8 +154,9 @@ remove_from_plugin_paths(State) ->
     ),
     rebar_state:code_paths(State, all_plugin_deps, PluginsMinusAuto).
 
-compile_file(<<".erl">>, Filename) ->
-    ErlOpts = [],
+compile_file(<<".erl">>, Filename, State) ->
+    Opts = rebar_state:opts(State),
+    ErlOpts = rebar_opts:erl_opts(Opts),
     case is_routefile(Filename) of
         true ->
             [AppFile | _] = filelib:wildcard(filename:dirname(Filename) ++ "/../src/*.app.src"),
@@ -179,7 +180,7 @@ compile_file(<<".erl">>, Filename) ->
                     ok
             end
     end;
-compile_file(<<".dtl">>, Filename) ->
+compile_file(<<".dtl">>, Filename, State) ->
     case erlang:module_loaded(erlydtl) of
         true ->
             %% Continue with the compilation
@@ -202,12 +203,15 @@ compile_file(<<".dtl">>, Filename) ->
             end;
         _ ->
             {module, _} = code:load_file(erlydtl),
-            compile_file(<<".dtl">>, Filename)
+            compile_file(<<".dtl">>, Filename, State)
     end.
 
 is_routefile([]) ->
     false;
 is_routefile(".routes.erl") ->
+    %% Reload routes
+    true;
+is_routefile("_router.erl") ->
     %% Reload routes
     true;
 is_routefile([_ | Tl]) ->
