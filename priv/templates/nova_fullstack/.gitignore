@@ -1,5 +1,7 @@
 .rebar3
-_*
+_build
+_checkouts
+_vendor
 .eunit
 *.o
 *.beam
@@ -10,12 +12,9 @@ _*
 ebin
 log
 erl_crash.dump
-.rebar
-logs
-_build
 .idea
 *.iml
 rebar3.crashdump
 *~
-doc/
-doc/
+.DS_Store
+priv/static/assets/js/arizona*.js

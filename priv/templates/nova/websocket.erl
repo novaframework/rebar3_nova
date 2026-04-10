@@ -1,12 +1,11 @@
 -module({{modname}}_ws_controller).
 -export([
-         init/1,
-         websocket_init/0,
-         websocket_handle/2,
-         websocket_info/2,
-         terminate/3
-        ]).
-
+    init/1,
+    websocket_init/0,
+    websocket_handle/2,
+    websocket_info/2,
+    terminate/3
+]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -26,14 +25,13 @@ init(State) ->
 websocket_init(State) ->
     {ok, State}.
 
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Handle received frame from websocket
 %% @end
 %%--------------------------------------------------------------------
 -spec websocket_handle(Frame :: nova_websocket:in_frame(), State :: map()) ->
-                              nova_websocket:call_result().
+    nova_websocket:call_result().
 websocket_handle(_Frame, State) ->
     {ok, State}.
 
@@ -51,6 +49,6 @@ websocket_info(_Info, State) ->
 %% Terminate the server
 %% @end
 %%--------------------------------------------------------------------
--spec terminate(Reason :: nova_websocket:reason(), PartialReq :: map(), State :: map() -> ok.
+-spec terminate(Reason :: nova_websocket:reason(), PartialReq :: map(), State :: map()) -> ok.
 terminate(_Reason, _PartialReq, _State) ->
     ok.
