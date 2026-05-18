@@ -9,7 +9,8 @@
 -export([
     summarize/1,
     section_status/1,
-    parse_csv/1
+    parse_csv/1,
+    check_session/1
 ]).
 -endif.
 
@@ -208,15 +209,22 @@ check_config(State) ->
             BadPort ->
                 {error, io_lib:format("invalid port: ~p", [BadPort]), ""}
         end,
-    SessionFinding =
-        case proplists:get_value(session_backend, NovaConfig) of
-            undefined ->
-                {warn, "session_backend unset (defaults to ETS)",
-                    "Fine for dev; pick a durable backend for production"};
-            Backend ->
-                {ok, io_lib:format("session_backend = ~p", [Backend])}
-        end,
-    [JsonFinding, CowboyFinding, SessionFinding].
+    [JsonFinding, CowboyFinding, check_session(NovaConfig)].
+
+check_session(NovaConfig) ->
+    case proplists:get_value(use_sessions, NovaConfig, true) of
+        false ->
+            {ok, "sessions disabled (use_sessions = false)"};
+        _ ->
+            case proplists:get_value(session_manager, NovaConfig) of
+                undefined ->
+                    {warn, "session_manager unset (defaults to nova_session_ets)",
+                        "Fine for single-node; set {session_manager, nova_session_ets} "
+                        "explicitly to acknowledge, or pick a clustered backend"};
+                Manager ->
+                    {ok, io_lib:format("session_manager = ~p", [Manager])}
+            end
+    end.
 
 check_routes(State) ->
     AppName = rebar3_nova_utils:get_app_name(State),

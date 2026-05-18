@@ -18,7 +18,11 @@
     summarize_with_errors/1,
     summarize_warnings_only/1,
     summarize_strict_promotes_warnings/1,
-    summarize_strict_clean/1
+    summarize_strict_clean/1,
+    check_session_default_warns/1,
+    check_session_explicit_ets_ok/1,
+    check_session_custom_manager_ok/1,
+    check_session_disabled_ok/1
 ]).
 
 all() ->
@@ -36,7 +40,11 @@ all() ->
         summarize_with_errors,
         summarize_warnings_only,
         summarize_strict_promotes_warnings,
-        summarize_strict_clean
+        summarize_strict_clean,
+        check_session_default_warns,
+        check_session_explicit_ets_ok,
+        check_session_custom_manager_ok,
+        check_session_disabled_ok
     ].
 
 %%======================================================================
@@ -112,3 +120,33 @@ summarize_strict_promotes_warnings(_Config) ->
 summarize_strict_clean(_Config) ->
     %% --strict with zero warnings and zero errors is still ok.
     ?assertEqual(ok, rebar3_nova_doctor:summarize({5, 0, 0, true})).
+
+%%======================================================================
+%% check_session/1
+%%======================================================================
+
+check_session_default_warns(_Config) ->
+    ?assertMatch({warn, _, _}, rebar3_nova_doctor:check_session([])).
+
+check_session_explicit_ets_ok(_Config) ->
+    ?assertMatch(
+        {ok, _},
+        rebar3_nova_doctor:check_session([{session_manager, nova_session_ets}])
+    ).
+
+check_session_custom_manager_ok(_Config) ->
+    ?assertMatch(
+        {ok, _},
+        rebar3_nova_doctor:check_session([{session_manager, my_redis_session}])
+    ).
+
+check_session_disabled_ok(_Config) ->
+    ?assertMatch({ok, _}, rebar3_nova_doctor:check_session([{use_sessions, false}])),
+    %% use_sessions=false wins even if a manager is also configured.
+    ?assertMatch(
+        {ok, _},
+        rebar3_nova_doctor:check_session([
+            {use_sessions, false},
+            {session_manager, nova_session_ets}
+        ])
+    ).
