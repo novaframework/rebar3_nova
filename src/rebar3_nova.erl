@@ -25,6 +25,7 @@ init(State) ->
                     rebar3_nova_middleware,
                     rebar3_nova_config,
                     rebar3_nova_audit,
+                    rebar3_nova_doctor,
                     rebar3_nova_release,
                     rebar3_nova_new
                 ]
@@ -48,6 +49,7 @@ init(State) ->
                     rebar3_nova_middleware,
                     rebar3_nova_config,
                     rebar3_nova_audit,
+                    rebar3_nova_doctor,
                     rebar3_nova_release,
                     rebar3_nova_new
                 ]

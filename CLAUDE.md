@@ -20,6 +20,7 @@ rebar3 nova openapi          # Generate OpenAPI spec to priv/assets/
 rebar3 nova middleware       # Show plugin/middleware chains
 rebar3 nova config           # Show Nova configuration
 rebar3 nova audit            # Security audit of routes
+rebar3 nova doctor           # Diagnose project health (toolchain, config, routes, build, ...)
 rebar3 nova release          # Build release (regenerates OpenAPI if schemas exist)
 ```
 
@@ -36,6 +37,7 @@ rebar3 nova release          # Build release (regenerates OpenAPI if schemas exi
 - `rebar3_nova_middleware.erl` — middleware/plugin chain display
 - `rebar3_nova_config.erl` — Nova config display
 - `rebar3_nova_audit.erl` — route security audit
+- `rebar3_nova_doctor.erl` — project health checks across toolchain, config, routes, deps, security hygiene, build
 - `rebar3_nova_release.erl` — release builder (wraps rebar3 release)
 - `rebar3_nova_utils.erl` — shared helpers (app name/dir, ensure_dir, file writing)
 
