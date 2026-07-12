@@ -206,6 +206,71 @@ $ rebar3 nova audit
 - **Warning**: Wildcard method (`'_'`) matching all HTTP methods on a route
 - **Info**: GET routes without a security callback
 
+### `nova doctor` — Diagnose project health
+
+Runs a suite of read-only checks against the current project and reports findings grouped by section. Each finding has a level (`ok`, `warning`, or `error`). Ok findings are collapsed by default; pass `-v` to expand them.
+
+```
+$ rebar3 nova doctor
+
+=== Nova Doctor ===
+
+✅ Toolchain
+    (3 ok, run with -v for detail)
+
+✅ Project structure
+    (3 ok, run with -v for detail)
+
+⚠️ Configuration    1 warning(s)
+    ! session_backend unset (defaults to ETS)
+        hint: Fine for dev; pick a durable backend for production
+
+✅ Routes
+    (55 ok, run with -v for detail)
+
+✅ Dependencies
+    (2 ok, run with -v for detail)
+
+⚠️ Security hygiene    1 warning(s)
+    ! erl_crash.dump in project root
+        hint: Delete it (already gitignored)
+
+✅ Build artifacts
+    (2 ok, run with -v for detail)
+
+--
+Summary: 68 ok, 2 warning(s), 0 error(s)
+```
+
+**Sections:**
+
+| Section | Checks |
+|---------|--------|
+| `toolchain` | OTP version, rebar3 version, `.tool-versions` or `mise.toml` pinning |
+| `project` | `bootstrap_application` set, `<app>_router:routes/1` exported, `.app.src` lists `nova` in `applications` |
+| `config` | `json_lib` value, Cowboy port set, `session_backend` set |
+| `routes` | Every compiled route resolves to an exported handler (or captured fun); flags duplicate `{method, path}` pairs |
+| `deps` | `rebar.lock` committed, active profiles |
+| `security` | `erl_crash.dump` and `.env` presence vs `.gitignore` |
+| `build` | `_build/default` and app `ebin` exist |
+
+**Options:**
+
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `--only` | no | (all) | Comma-separated section ids to run |
+| `--skip` | no | (none) | Comma-separated section ids to skip |
+| `-v`, `--verbose` | no | `false` | Expand `ok`-level findings, not just warnings/errors |
+| `-s`, `--strict` | no | `false` | Exit with code 1 if any warnings are reported (useful in CI) |
+
+Exit code is `0` when there are no errors. Errors always fail; warnings only fail under `--strict`.
+
+```
+$ rebar3 nova doctor --only routes
+$ rebar3 nova doctor --skip toolchain,deps -v
+$ rebar3 nova doctor --strict
+```
+
 ### `nova release` — Build a release
 
 Wraps the standard rebar3 release provider. If `priv/schemas/` exists, regenerates the OpenAPI spec before building.
