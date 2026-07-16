@@ -142,6 +142,26 @@ listen_on_project_apps(State) ->
         ProjectApps ++ CheckoutDeps
     ).
 
+%% The include dirs rebar adds during a real compile ({i, "include"}
+%% etc. relative to the owning app) are not part of erl_opts, so a
+%% bare compile:file/2 cannot resolve -include("...") headers. Find
+%% the app the changed file belongs to and mirror rebar's include
+%% path setup.
+include_opts(Filename, State) ->
+    Abs = filename:split(filename:absname(Filename)),
+    Apps = rebar_state:project_apps(State) ++
+        [App || App <- rebar_state:all_deps(State),
+                rebar_app_info:is_checkout(App)],
+    Dirs = [rebar_app_info:dir(App) || App <- Apps],
+    case [Dir || Dir <- Dirs, lists:prefix(filename:split(Dir), Abs)] of
+        [AppDir | _] ->
+            [{i, filename:join(AppDir, "include")},
+             {i, filename:join(AppDir, "src")},
+             {i, AppDir}];
+        [] ->
+            []
+    end.
+
 remove_from_plugin_paths(State) ->
     PluginPaths = rebar_state:code_paths(State, all_plugin_deps),
     PluginsMinusAuto = lists:filter(
@@ -156,7 +176,7 @@ remove_from_plugin_paths(State) ->
 
 compile_file(<<".erl">>, Filename, State) ->
     Opts = rebar_state:opts(State),
-    ErlOpts = rebar_opts:erl_opts(Opts),
+    ErlOpts = rebar_opts:erl_opts(Opts) ++ include_opts(Filename, State),
     case is_routefile(Filename) of
         true ->
             [AppFile | _] = filelib:wildcard(filename:dirname(Filename) ++ "/../src/*.app.src"),
