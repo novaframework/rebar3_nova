@@ -149,15 +149,21 @@ listen_on_project_apps(State) ->
 %% path setup.
 include_opts(Filename, State) ->
     Abs = filename:split(filename:absname(Filename)),
-    Apps = rebar_state:project_apps(State) ++
-        [App || App <- rebar_state:all_deps(State),
-                rebar_app_info:is_checkout(App)],
+    Apps =
+        rebar_state:project_apps(State) ++
+            [
+                App
+             || App <- rebar_state:all_deps(State),
+                rebar_app_info:is_checkout(App)
+            ],
     Dirs = [rebar_app_info:dir(App) || App <- Apps],
     case [Dir || Dir <- Dirs, lists:prefix(filename:split(Dir), Abs)] of
         [AppDir | _] ->
-            [{i, filename:join(AppDir, "include")},
-             {i, filename:join(AppDir, "src")},
-             {i, AppDir}];
+            [
+                {i, filename:join(AppDir, "include")},
+                {i, filename:join(AppDir, "src")},
+                {i, AppDir}
+            ];
         [] ->
             []
     end.
