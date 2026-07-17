@@ -195,6 +195,10 @@ compile_file(<<".erl">>, Filename, State) ->
                     rebar_api:info("Compiled ~p", [ModuleName]),
                     {module, _Mod} = code:load_binary(ModuleName, Filename, Binary),
                     code:purge(ModuleName);
+                {ok, ModuleName, Binary, []} ->
+                    rebar_api:warn("Compiled ~p", [ModuleName]),
+                    {module, _Mod} = code:load_binary(ModuleName, Filename, Binary),
+                    code:purge(ModuleName);
                 {ok, ModuleName, Binary, Warnings} ->
                     rebar_api:warn("Compiled ~p with warnings: ~p", [ModuleName, Warnings]),
                     {module, _Mod} = code:load_binary(ModuleName, Filename, Binary),
