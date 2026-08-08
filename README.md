@@ -1,5 +1,4 @@
 # Rebar3 plugin for Nova
-=====
 
 A rebar plugin for nova
 
