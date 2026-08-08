@@ -9,5 +9,6 @@ jobs:
       otp-version: '28'
       rebar3-version: '3.26.0'
       enable-eunit: false
+      enable-ct: true
       enable-ex-doc: true
       enable-dialyzer: false
