@@ -13,6 +13,8 @@
     ci_flag/1,
     docker_flag/1,
     otel_flag/1,
+    erlydtl_provider_hooks/1,
+    template_erlydtl_provider_hooks/1,
     combined_kura_arizona_ci/1,
     kura_pgo_mutually_exclusive/1,
     existing_dir_aborts/1
@@ -28,6 +30,8 @@ all() ->
         ci_flag,
         docker_flag,
         otel_flag,
+        erlydtl_provider_hooks,
+        template_erlydtl_provider_hooks,
         combined_kura_arizona_ci,
         kura_pgo_mutually_exclusive,
         existing_dir_aborts
@@ -75,6 +79,7 @@ base_project(_Config) ->
     assert_contains(RebarConfig, "nova"),
     assert_contains(RebarConfig, "flatlog"),
     assert_contains(RebarConfig, "rebar3_erlydtl_plugin"),
+    assert_contains(RebarConfig, "provider_hooks"),
     assert_not_contains(RebarConfig, "kura"),
     assert_not_contains(RebarConfig, "arizona"),
 
@@ -226,6 +231,46 @@ otel_flag(_Config) ->
 
     ok.
 
+erlydtl_provider_hooks(_Config) ->
+    Hook = {provider_hooks, [{pre, [{compile, {erlydtl, compile}}]}]},
+
+    Base = "testapp_hooks_base",
+    rebar3_nova_new:generate_project(Base, default_flags()),
+    ?assert(lists:member(Hook, consult_rebar_config(Base))),
+
+    Kura = "testapp_hooks_kura",
+    rebar3_nova_new:generate_project(Kura, (default_flags())#{kura => true}),
+    ?assert(lists:member(Hook, consult_rebar_config(Kura))),
+
+    Arizona = "testapp_hooks_arizona",
+    rebar3_nova_new:generate_project(Arizona, (default_flags())#{arizona => true}),
+    ?assertEqual(
+        false,
+        lists:keyfind(provider_hooks, 1, consult_rebar_config(Arizona))
+    ),
+
+    Lfe = "testapp_hooks_lfe",
+    rebar3_nova_new:generate_project(Lfe, (default_flags())#{lfe => true}),
+    ?assert(
+        lists:member(
+            {provider_hooks, [
+                {pre, [{compile, {erlydtl, compile}}, {compile, {lfe, compile}}]}
+            ]},
+            consult_rebar_config(Lfe)
+        )
+    ),
+
+    ok.
+
+template_erlydtl_provider_hooks(_Config) ->
+    PrivDir = code:priv_dir(rebar3_nova),
+    Template = filename:join([PrivDir, "templates", "nova", "rebar.config"]),
+    {ok, Bin} = file:read_file(Template),
+    Content = binary_to_list(Bin),
+    assert_contains(Content, "{provider_hooks, ["),
+    assert_contains(Content, "{pre, [{compile, {erlydtl, compile}}]}"),
+    ok.
+
 combined_kura_arizona_ci(_Config) ->
     Name = "testapp_combo",
     Flags = (default_flags())#{kura => true, arizona => true, ci => true},
@@ -288,6 +333,10 @@ assert_file_exists(Base, RelPath) ->
 assert_file_not_exists(Base, RelPath) ->
     Path = filename:join(Base, RelPath),
     ?assertNot(filelib:is_regular(Path), #{msg => "Expected file to not exist", path => Path}).
+
+consult_rebar_config(Base) ->
+    {ok, Terms} = file:consult(filename:join(Base, "rebar.config")),
+    Terms.
 
 read_file(Base, RelPath) ->
     Path = filename:join(Base, RelPath),
