@@ -6,8 +6,9 @@ jobs:
   ci:
     uses: Taure/erlang-ci/.github/workflows/ci.yml@v1
     with:
-      otp-version: '28.0'
+      otp-version: '28'
       rebar3-version: '3.26.0'
       enable-eunit: false
+      enable-ct: true
       enable-ex-doc: true
       enable-dialyzer: false

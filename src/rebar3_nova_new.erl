@@ -289,7 +289,12 @@ rebar_provider_hooks(#{lfe := true}) ->
 rebar_provider_hooks(#{arizona := true}) ->
     [];
 rebar_provider_hooks(_) ->
-    [].
+    [
+        "%% Compile the .dtl views in src/views before the Erlang sources\n",
+        "{provider_hooks, [\n",
+        "    {pre, [{compile, {erlydtl, compile}}]}\n",
+        "]}.\n\n"
+    ].
 
 rebar_xref() ->
     [
