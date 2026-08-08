@@ -7,7 +7,7 @@
         stdlib,
         nova,
         routing_tree,
-        enotify
+        fs
     ]},
     {env, []},
     {modules, []},
