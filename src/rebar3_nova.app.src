@@ -1,5 +1,5 @@
 {application, rebar3_nova, [
-    {description, "A rebar plugin"},
+    {description, "Rebar3 plugin for scaffolding and managing Nova framework projects"},
     {vsn, git},
     {registered, []},
     {applications, [
@@ -7,11 +7,11 @@
         stdlib,
         nova,
         routing_tree,
-        enotify
+        fs
     ]},
     {env, []},
     {modules, []},
 
-    {licenses, ["Apache 2.0"]},
-    {links, []}
+    {licenses, ["Apache-2.0"]},
+    {links, [{"GitHub", "https://github.com/novaframework/rebar3_nova"}]}
 ]}.

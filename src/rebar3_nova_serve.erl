@@ -13,7 +13,8 @@
 
 -export([
     auto/1,
-    flush/0
+    flush/0,
+    watch_dirs/1
 ]).
 
 -define(PROVIDER, serve).
@@ -81,7 +82,7 @@ do(State) ->
 
 auto(State) ->
     receive
-        {ChangedFile, _Events} ->
+        {_Pid, {fs, file_event}, {ChangedFile, _Events}} ->
             Ext = filename:extension(unicode:characters_to_binary(ChangedFile)),
             IsValid = lists:any(
                 fun(ValidExt) ->
@@ -122,25 +123,34 @@ listen_on_project_apps(State) ->
         rebar_app_info:is_checkout(AppInfo) == true
     ],
     ProjectApps = rebar_state:project_apps(State),
-    lists:foreach(
-        fun(AppInfo) ->
-            SrcDir = filename:join(rebar_app_info:dir(AppInfo), "src"),
-            ViewsDir = filename:join(SrcDir, "views"),
-            CtrlDir = filename:join(SrcDir, "controllers"),
-            PrivDir = filename:join(rebar_app_info:dir(AppInfo), "priv"),
-            CSrcDir = filename:join(rebar_app_info:dir(AppInfo), "c_src"),
-            lists:foreach(
-                fun(Dir) ->
-                    case filelib:is_dir(Dir) of
-                        true -> enotify:start_link(Dir);
-                        false -> ignore
-                    end
-                end,
-                [SrcDir, ViewsDir, CtrlDir, PrivDir, CSrcDir]
-            )
-        end,
-        ProjectApps ++ CheckoutDeps
-    ).
+    Dirs = [
+        Dir
+     || AppInfo <- ProjectApps ++ CheckoutDeps,
+        Dir <- watch_dirs(rebar_app_info:dir(AppInfo)),
+        filelib:is_dir(Dir)
+    ],
+    lists:foreach(fun watch/1, lists:enumerate(Dirs)).
+
+watch_dirs(AppDir) ->
+    SrcDir = filename:join(AppDir, "src"),
+    [
+        SrcDir,
+        filename:join(SrcDir, "views"),
+        filename:join(SrcDir, "controllers"),
+        filename:join(AppDir, "priv"),
+        filename:join(AppDir, "c_src")
+    ].
+
+%% Each watched directory needs its own fs backend, and fs registers the
+%% event manager under the name we hand it.
+watch({N, Dir}) ->
+    Name = list_to_atom("nova_fs_" ++ integer_to_list(N)),
+    case fs:start_link(Name, Dir) of
+        {ok, _Pid} ->
+            fs:subscribe(Name);
+        {error, Reason} ->
+            rebar_api:warn("Not watching ~ts for changes: ~p", [Dir, Reason])
+    end.
 
 %% The include dirs rebar adds during a real compile ({i, "include"}
 %% etc. relative to the owning app) are not part of erl_opts, so a
@@ -174,7 +184,7 @@ remove_from_plugin_paths(State) ->
         fun(Path) ->
             Name = filename:basename(Path, "/ebin"),
             not (list_to_atom(Name) =:= rebar_auto_plugin orelse
-                list_to_atom(Name) =:= enotify)
+                list_to_atom(Name) =:= fs)
         end,
         PluginPaths
     ),
