@@ -2,8 +2,10 @@
 
 -export([init/1, do/1, format_error/1]).
 
+%% Exported for rebar3_nova_dispatch_SUITE.
+-export([print_routes/1]).
+
 -include("nova_router.hrl").
--include_lib("routing_tree/include/routing_tree.hrl").
 
 -define(PROVIDER, routes).
 -define(DEPS, [{default, compile}]).
@@ -47,95 +49,39 @@ format_error(Reason) ->
 %% Private functions
 %% ===================================================================
 print_routes(Dispatch) ->
-    format_tree(Dispatch).
+    Routes = lists:sort(nova_routing_trie:routes(Dispatch)),
+    [print_route(Route) || Route <- Routes],
+    ok.
 
-format_tree([]) ->
-    ok;
-format_tree(#host_tree{hosts = Hosts}) ->
-    format_tree(Hosts);
-format_tree([{Host, #routing_tree{tree = Tree}} | Tl]) ->
-    io:format("Host: ~p~n", [Host]),
-    format_tree(Tree, 1) ++ format_tree(Tl).
+print_route({Host, Path, Method, Payload}) ->
+    io:format(
+        "~-8ts ~-40ts ~ts~ts~n",
+        [
+            rebar3_nova_dispatch:method_to_binary(Method),
+            format_path(Path),
+            format_handler(Payload),
+            format_host(Host)
+        ]
+    ).
 
-format_tree([], _Depth) ->
-    [];
-format_tree([#node{segment = Segment, value = [], children = Children} | Tl], Depth) ->
-    %% Just a plain node
-    Segment0 =
-        case false of
-            _ when
-                is_list(Segment) orelse
-                    is_binary(Segment)
-            ->
-                Segment;
-            _ when is_integer(Segment) ->
-                erlang:integer_to_list(Segment);
-            _Catchall ->
-                "[...]"
-        end,
-    Prefix = [$\s || _X <- lists:seq(0, Depth * 4)],
-    case Tl of
-        [] ->
-            io:format("~ts~ts /~ts~n", [Prefix, <<226, 148, 148, 226, 148, 128, 32>>, Segment0]);
-        _ ->
-            io:format("~ts~ts /~ts~n", [Prefix, <<226, 148, 156, 226, 148, 128, 32>>, Segment0])
-    end,
-    format_tree(Children, Depth + 1),
-    format_tree(Tl, Depth);
-format_tree([#node{segment = Segment, value = Value, children = Children} | Tl], Depth) ->
-    Segment0 =
-        case false of
-            _ when
-                is_list(Segment) orelse
-                    is_binary(Segment)
-            ->
-                Segment;
-            _ when is_integer(Segment) ->
-                erlang:integer_to_list(Segment);
-            _CatchAll ->
-                "[...]"
-        end,
-    Prefix = [$\s || _X <- lists:seq(0, Depth * 4)],
+format_path(Path) when is_integer(Path) ->
+    %% A status-code route rather than a URL.
+    io_lib:format("(status ~b)", [Path]);
+format_path(Path) ->
+    Path.
 
-    lists:foreach(
-        fun(#node_comp{comparator = Method, value = Value0}) ->
-            {App, Mod, Func} =
-                case Value0 of
-                    #nova_handler_value{
-                        app = App0, module = undefined, function = undefined, callback = Callback0
-                    } ->
-                        {module, Module} = lists:keyfind(module, 1, erlang:fun_info(Callback0)),
-                        {name, Function} = lists:keyfind(name, 1, erlang:fun_info(Callback0)),
-                        {App0, Module, Function};
-                    #nova_handler_value{app = App0, module = Mod0, function = Func0} ->
-                        {App0, Mod0, Func0};
-                    #cowboy_handler_value{app = App0, handler = Handler} ->
-                        {App0, Handler, init}
-                end,
-            case Tl of
-                [] ->
-                    io:format("~ts~ts ~ts /~ts (~ts, ~ts:~ts/1)~n", [
-                        Prefix,
-                        <<226, 148, 148, 226, 148, 128, 32>>,
-                        Method,
-                        Segment0,
-                        App,
-                        Mod,
-                        Func
-                    ]);
-                _ ->
-                    io:format("~ts~ts ~ts /~ts (~ts, ~ts:~ts/1)~n", [
-                        Prefix,
-                        <<226, 148, 156, 226, 148, 128, 32>>,
-                        Method,
-                        Segment0,
-                        App,
-                        Mod,
-                        Func
-                    ])
-            end
-        end,
-        Value
-    ),
-    format_tree(Children, Depth + 1),
-    format_tree(Tl, Depth).
+format_host('_') -> <<>>;
+format_host(Host) -> io_lib:format("  [host ~ts]", [Host]).
+
+format_handler(#nova_handler_value{module = undefined, function = undefined, callback = Callback}) when
+    is_function(Callback)
+->
+    {module, Module} = lists:keyfind(module, 1, erlang:fun_info(Callback)),
+    {name, Function} = lists:keyfind(name, 1, erlang:fun_info(Callback)),
+    io_lib:format("~ts:~ts/1", [Module, Function]);
+format_handler(#nova_handler_value{module = Module, function = Function}) ->
+    io_lib:format("~ts:~ts/1", [Module, Function]);
+format_handler(#cowboy_handler_value{handler = Handler}) ->
+    io_lib:format("~ts (cowboy handler)", [Handler]);
+format_handler(Other) ->
+    io_lib:format("~p", [Other]).
