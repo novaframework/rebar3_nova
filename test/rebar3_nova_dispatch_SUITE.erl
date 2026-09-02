@@ -5,7 +5,19 @@
 %%% dispatch table with nova_router and checks each task can still read it.
 -module(rebar3_nova_dispatch_SUITE).
 
--compile([export_all, nowarn_export_all]).
+-export([all/0, init_per_suite/1, end_per_suite/1]).
+
+-export([
+    routes_are_flattened/1,
+    status_code_routes_are_left_out/1,
+    openapi_paths_use_braces/1,
+    catch_all_is_dropped_from_openapi_paths/1,
+    methods_are_lowercased/1,
+    audit_reads_the_table/1,
+    openapi_reads_the_table/1,
+    doctor_reads_the_table/1,
+    routes_task_prints_the_table/1
+]).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
