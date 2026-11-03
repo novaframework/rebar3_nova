@@ -130,6 +130,9 @@ $ rebar3 nova gen_auth
 
 It then prints the deps (`nova_auth`, `kura`, `kura_postgres`), the `rebar3_kura` hook and the routes to add. The project needs a Kura repo named `myapp_repo`, as `rebar3 nova new --kura` creates. Pin `{nova_auth, "~> 0.2.0"}`: the rate-limit plugin sets nova_auth 0.2's `key_fun` option, which later versions reject.
 
+- Registration takes `email`, `password` and `password_confirmation`. The changesets drop the plaintext from the changeset's changes and params once hashed, valid or not, so it does not reach a log in `{error, Changeset}`.
+- `email_changeset/2` (used by `nova_auth_accounts:change_identity/4`) resets `confirmed_at` when the address really changes; `password_changeset/2` hashes the new password.
+- The token schema has `family_id` and `used_at`, which `nova_auth_refresh` needs.
 - Put the rate limiter before `nova_request_plugin`, as the printed routes do, so a flood is refused before its body is decoded. It keys on the TCP peer, which is the client only when the node is exposed directly. Behind a reverse proxy every client shares the proxy's address and one bucket: switch to the commented-out `client_ip/1` in the plugin, which reads `x-forwarded-for` only from the proxies in `{trusted_proxies, [...]}` in the app env and takes the right-most address that is not one of them.
 
 ### `nova openapi` — Generate OpenAPI 3.0.3 spec

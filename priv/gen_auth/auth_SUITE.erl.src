@@ -8,6 +8,7 @@
     register_login_and_logout/1,
     wrong_password_is_rejected/1,
     short_password_is_rejected/1,
+    mismatched_confirmation_is_rejected/1,
     me_needs_a_token/1
 ]).
 
@@ -16,6 +17,7 @@ all() ->
         register_login_and_logout,
         wrong_password_is_rejected,
         short_password_is_rejected,
+        mismatched_confirmation_is_rejected,
         me_needs_a_token
     ].
 
@@ -29,7 +31,7 @@ end_per_suite(_Config) ->
 
 register_login_and_logout(_Config) ->
     Email = unique_email(),
-    {201, #{~"email" := Email}} = post("/api/users", #{email => Email, password => password()}),
+    {201, #{~"email" := Email}} = post("/api/users", registration(Email, password())),
     {201, #{~"token" := Token}} = post("/api/tokens", #{email => Email, password => password()}),
     ?assertMatch({200, #{~"email" := Email}}, request(get, "/api/me", Token)),
     ?assertMatch({204, _}, request(delete, "/api/tokens", Token)),
@@ -37,13 +39,20 @@ register_login_and_logout(_Config) ->
 
 wrong_password_is_rejected(_Config) ->
     Email = unique_email(),
-    {201, _} = post("/api/users", #{email => Email, password => password()}),
+    {201, _} = post("/api/users", registration(Email, password())),
     ?assertMatch({401, _}, post("/api/tokens", #{email => Email, password => ~"not the password"})).
 
 short_password_is_rejected(_Config) ->
     ?assertMatch(
         {422, #{~"errors" := #{~"password" := [_ | _]}}},
-        post("/api/users", #{email => unique_email(), password => ~"short"})
+        post("/api/users", registration(unique_email(), ~"short"))
+    ).
+
+mismatched_confirmation_is_rejected(_Config) ->
+    Body = #{email => unique_email(), password => password(), password_confirmation => ~"other"},
+    ?assertMatch(
+        {422, #{~"errors" := #{~"password_confirmation" := [_ | _]}}},
+        post("/api/users", Body)
     ).
 
 me_needs_a_token(_Config) ->
@@ -55,6 +64,9 @@ unique_email() ->
 
 password() ->
     ~"correct horse battery staple".
+
+registration(Email, Password) ->
+    #{email => Email, password => Password, password_confirmation => Password}.
 
 post(Path, Body) ->
     Request = {url(Path), [], "application/json", json:encode(Body)},

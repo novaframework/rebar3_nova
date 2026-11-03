@@ -2,6 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
+-include_lib("kura/include/kura.hrl").
 
 -export([all/0, init_per_suite/1, end_per_suite/1]).
 -export([
@@ -22,7 +23,11 @@
     auth_rate_limit_runs_before_the_body_is_decoded/1,
     auth_rate_limit_keys_on_the_peer/1,
     auth_rate_limit_proxy_variant_is_formatted/1,
-    auth_rate_limit_proxy_variant_trusts_only_proxies/1
+    auth_rate_limit_proxy_variant_trusts_only_proxies/1,
+    auth_token_schema_has_the_refresh_fields/1,
+    auth_registration_needs_a_matching_confirmation/1,
+    auth_changesets_scrub_the_password/1,
+    auth_email_change_resets_confirmed_at/1
 ]).
 
 -define(ACTIONS, [list, show, create, update, delete]).
@@ -46,7 +51,11 @@ all() ->
         auth_rate_limit_runs_before_the_body_is_decoded,
         auth_rate_limit_keys_on_the_peer,
         auth_rate_limit_proxy_variant_is_formatted,
-        auth_rate_limit_proxy_variant_trusts_only_proxies
+        auth_rate_limit_proxy_variant_trusts_only_proxies,
+        auth_token_schema_has_the_refresh_fields,
+        auth_registration_needs_a_matching_confirmation,
+        auth_changesets_scrub_the_password,
+        auth_email_change_resets_confirmed_at
     ].
 
 init_per_suite(Config) ->
@@ -224,6 +233,59 @@ auth_rate_limit_proxy_variant_trusts_only_proxies(Config) ->
         application:unset_env(blog, trusted_proxies)
     end.
 
+auth_token_schema_has_the_refresh_fields(Config) ->
+    Token = compile_source(Config, "blog_user_token", render_auth("user_token.erl.src")),
+    Types = maps:from_list([{F#kura_field.name, F#kura_field.type} || F <- Token:fields()]),
+    ?assertMatch(#{family_id := string, used_at := utc_datetime}, Types).
+
+auth_registration_needs_a_matching_confirmation(Config) ->
+    User = user_schema(Config),
+    Valid = registration(User, ~"a@example.com", ~"correct horse battery"),
+    ?assert(Valid#kura_changeset.valid),
+    ?assertEqual(
+        ~"hashed:correct horse battery", kura_changeset:get_change(Valid, hashed_password)
+    ),
+    Mismatch = User:registration_changeset(#{}, #{
+        ~"email" => ~"a@example.com",
+        ~"password" => ~"correct horse battery",
+        ~"password_confirmation" => ~"something else"
+    }),
+    ?assertNot(Mismatch#kura_changeset.valid),
+    ?assertMatch([{password_confirmation, _}], Mismatch#kura_changeset.errors),
+    ?assertEqual(undefined, kura_changeset:get_change(Mismatch, hashed_password)).
+
+%% A changeset comes back in {error, CS} and can reach a log or crash report.
+auth_changesets_scrub_the_password(Config) ->
+    User = user_schema(Config),
+    Pass = ~"correct horse battery",
+    assert_no_plaintext(registration(User, ~"a@example.com", Pass)),
+    assert_no_plaintext(registration(User, ~"not an email", ~"short")),
+    assert_no_plaintext(
+        User:registration_changeset(#{}, #{
+            ~"email" => ~"a@example.com", ~"password" => Pass, ~"password_confirmation" => ~"x"
+        })
+    ),
+    Change = User:password_changeset(#{id => 1, email => ~"a@example.com"}, #{
+        ~"password" => ~"a new long passphrase",
+        ~"password_confirmation" => ~"a new long passphrase"
+    }),
+    ?assert(Change#kura_changeset.valid),
+    ?assertEqual(
+        ~"hashed:a new long passphrase", kura_changeset:get_change(Change, hashed_password)
+    ),
+    assert_no_plaintext(Change).
+
+auth_email_change_resets_confirmed_at(Config) ->
+    User = user_schema(Config),
+    Data = #{id => 1, email => ~"old@b.com", confirmed_at => {{2026, 1, 1}, {0, 0, 0}}},
+    Changed = User:email_changeset(Data, #{~"email" => ~"New@B.com"}),
+    ?assert(Changed#kura_changeset.valid),
+    ?assertEqual(
+        #{email => ~"new@b.com", confirmed_at => undefined}, Changed#kura_changeset.changes
+    ),
+    Same = User:email_changeset(Data, #{~"email" => ~"OLD@b.com"}),
+    ?assertEqual(#{}, Same#kura_changeset.changes).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
@@ -251,6 +313,23 @@ uncomment(<<"%% ", Line/binary>>) -> Line.
 
 proxied_req(Peer, ForwardedFor) ->
     #{peer => {Peer, 443}, headers => #{~"x-forwarded-for" => ForwardedFor}}.
+
+user_schema(Config) ->
+    _ = compile_source(Config, "nova_auth_password", [
+        "-module(nova_auth_password).\n-export([hash/1]).\n",
+        "hash(Password) -> <<\"hashed:\", Password/binary>>.\n"
+    ]),
+    compile_source(Config, "blog_user", render_auth("user.erl.src")).
+
+registration(User, Email, Password) ->
+    User:registration_changeset(#{}, #{
+        ~"email" => Email, ~"password" => Password, ~"password_confirmation" => Password
+    }).
+
+assert_no_plaintext(#kura_changeset{changes = Changes, params = Params}) ->
+    Secret = [password, password_confirmation, ~"password", ~"password_confirmation"],
+    ?assertEqual([], [K || K <- Secret, maps:is_key(K, Changes)]),
+    ?assertEqual([], [K || K <- Secret, maps:is_key(K, Params)]).
 
 suite_source() ->
     rebar3_nova_gen_test:generate_content("gen_tags_controller_SUITE", blog, [

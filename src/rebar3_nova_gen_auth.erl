@@ -109,6 +109,8 @@ instructions(App) ->
             "       ]}~n~n"
             "4. Protect your own API routes with security => fun ~s_auth_security:require_bearer/1; "
             "the user is in the request under auth_data.~n"
+            "   Registration takes email, password and password_confirmation. Change an email "
+            "with nova_auth_accounts:change_identity/4, which resets confirmed_at.~n"
             "   The suite in test/~s_auth_SUITE.erl registers users in the database it runs "
             "against.~n",
             lists:duplicate(13, App)
