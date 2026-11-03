@@ -1,0 +1,39 @@
+-module({{app}}_rate_limit).
+-behaviour(nova_plugin).
+
+-export([pre_request/4, post_request/4, plugin_info/0, options/0, client_ip/1]).
+
+%% Wraps nova_auth_rate_limit, which in nova_auth 0.2.0 needs every option
+%% set and replies {stop, Req}, a return Nova does not accept.
+pre_request(Req, Env, Options, State) ->
+    case nova_auth_rate_limit:pre_request(Req, Env, maps:merge(options(), Options), State) of
+        {stop, Req1} -> {stop, Req1, State};
+        Result -> Result
+    end.
+
+post_request(Req, _Env, _Options, State) ->
+    {ok, Req, State}.
+
+plugin_info() ->
+    #{
+        title => ~"{{app}}_rate_limit",
+        version => ~"0.1.0",
+        url => ~"https://github.com/novaframework/nova_auth",
+        authors => [],
+        description => ~"Rate limits login and registration with nova_auth_rate_limit"
+    }.
+
+options() ->
+    #{
+        limiter => {{app}}_auth_rate_limit,
+        limit => 10,
+        window => 60000,
+        algorithm => sliding_window,
+        key_fun => fun ?MODULE:client_ip/1
+    }.
+
+%% Behind a proxy every request has the proxy's address; key on the
+%% client address the proxy forwards instead.
+client_ip(Req) ->
+    {IP, _Port} = cowboy_req:peer(Req),
+    IP.

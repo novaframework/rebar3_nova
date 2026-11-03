@@ -13,7 +13,11 @@
     test_suite_follows_the_routes/1,
     test_suite_compiles/1,
     test_suite_is_erlfmt_formatted/1,
-    test_suite_reads_the_port_at_runtime/1
+    test_suite_reads_the_port_at_runtime/1,
+    auth_files_are_valid_formatted_erlang/1,
+    auth_uses_nova_auth_not_bcrypt_or_thoas/1,
+    auth_writes_no_migration/1,
+    auth_names_follow_the_app/1
 ]).
 
 -define(ACTIONS, [list, show, create, update, delete]).
@@ -28,7 +32,11 @@ all() ->
         test_suite_follows_the_routes,
         test_suite_compiles,
         test_suite_is_erlfmt_formatted,
-        test_suite_reads_the_port_at_runtime
+        test_suite_reads_the_port_at_runtime,
+        auth_files_are_valid_formatted_erlang,
+        auth_uses_nova_auth_not_bcrypt_or_thoas,
+        auth_writes_no_migration,
+        auth_names_follow_the_app
     ].
 
 init_per_suite(Config) ->
@@ -71,6 +79,8 @@ resource_schema_does_not_require_id(_Config) ->
 resource_route_hints_use_funs(_Config) ->
     Hints = rebar3_nova_gen_resource:route_hints(blog, "tags", ?ACTIONS),
     ?assertEqual(5, length(Hints)),
+    ?assertEqual($}, lists:last(lists:last(Hints))),
+    ?assertEqual($,, lists:last(hd(Hints))),
     Routes = [eval_hint(H) || H <- Hints],
     [?assert(is_list(Path)) || {Path, _Fun, _Opts} <- Routes],
     [?assert(is_function(Fun, 1)) || {_Path, Fun, _Opts} <- Routes],
@@ -127,9 +137,46 @@ test_suite_reads_the_port_at_runtime(_Config) ->
         nomatch, string:find(Source, ~"{ok, _} = application:ensure_all_started(blog)")
     ).
 
+auth_files_are_valid_formatted_erlang(_Config) ->
+    [assert_formatted(rebar3_nova_gen_auth:render(T, "blog")) || {T, _} <- auth_files()].
+
+auth_uses_nova_auth_not_bcrypt_or_thoas(_Config) ->
+    Sources = [rebar3_nova_gen_auth:render(T, "blog") || {T, _} <- auth_files()],
+    [?assertEqual(nomatch, binary:match(S, [~"bcrypt", ~"thoas", ~"citext"])) || S <- Sources],
+    All = iolist_to_binary(Sources),
+    ?assertNotEqual(nomatch, binary:match(All, ~"nova_auth_password:hash")),
+    ?assertNotEqual(nomatch, binary:match(All, ~"nova_auth_accounts:authenticate")),
+    ?assertNotEqual(nomatch, binary:match(All, ~"-behaviour(nova_auth).")).
+
+auth_writes_no_migration(_Config) ->
+    ?assertEqual([], [P || {_, P} <- auth_files(), string:find(P, "migration") =/= nomatch]).
+
+auth_names_follow_the_app(_Config) ->
+    Paths = [P || {_, P} <- auth_files()],
+    ?assert(lists:member("src/blog_auth.erl", Paths)),
+    ?assert(lists:member("src/schemas/blog_user.erl", Paths)),
+    ?assert(lists:member("src/controllers/blog_auth_controller.erl", Paths)),
+    [
+        ?assertEqual(nomatch, binary:match(rebar3_nova_gen_auth:render(T, "blog"), ~"{{app}}"))
+     || {T, _} <- auth_files()
+    ],
+    [
+        ?assertNotEqual(
+            nomatch,
+            binary:match(
+                rebar3_nova_gen_auth:render(T, "blog"),
+                iolist_to_binary(["-module(", filename:basename(P, ".erl"), ")."])
+            )
+        )
+     || {T, P} <- auth_files()
+    ].
+
 %%====================================================================
 %% Helpers
 %%====================================================================
+
+auth_files() ->
+    rebar3_nova_gen_auth:files("blog").
 
 suite_source() ->
     rebar3_nova_gen_test:generate_content("gen_tags_controller_SUITE", blog, [

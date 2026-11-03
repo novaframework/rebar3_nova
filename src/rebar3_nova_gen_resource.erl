@@ -81,10 +81,14 @@ print_route_hints(AppName, Name, Actions) ->
 route_hints(AppName, Name, Actions) ->
     Controller = lists:flatten(io_lib:format("~s_~s_controller", [AppName, Name])),
     Schema = "schemas/" ++ singularize(Name) ++ ".json",
-    [
+    Hints = [
         Hint
      || Action <- Actions, Hint <- [route_hint(Action, Name, Controller, Schema)], Hint =/= skip
-    ].
+    ],
+    case lists:reverse(Hints) of
+        [] -> [];
+        [Last | Rest] -> lists:reverse([Last | [H ++ "," || H <- Rest]])
+    end.
 
 route_hint(list, Name, Controller, _Schema) ->
     hint("/" ++ Name, Controller, list, "get", "");
@@ -101,7 +105,7 @@ route_hint(_Action, _Name, _Controller, _Schema) ->
 
 hint(Path, Controller, Function, Method, Extra) ->
     lists:flatten(
-        io_lib:format("{\"~ts\", fun ~ts:~ts/1, #{methods => [~ts]~ts}},", [
+        io_lib:format("{\"~ts\", fun ~ts:~ts/1, #{methods => [~ts]~ts}}", [
             Path, Controller, Function, Method, Extra
         ])
     ).

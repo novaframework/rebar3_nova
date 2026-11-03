@@ -1,0 +1,46 @@
+-module({{app}}_auth_controller).
+-include_lib("kura/include/kura.hrl").
+
+-export([register/1, login/1, logout/1, me/1]).
+
+register(#{json := Params}) when is_map(Params) ->
+    case {{app}}_accounts:register(Params) of
+        {ok, User} ->
+            {json, 201, #{}, user_json(User)};
+        {error, #kura_changeset{errors = Errors}} ->
+            {json, 422, #{}, #{~"errors" => errors_json(Errors)}}
+    end;
+register(_Req) ->
+    {json, 400, #{}, #{~"error" => ~"expected a JSON object"}}.
+
+login(#{json := #{~"email" := Email, ~"password" := Password}}) ->
+    case {{app}}_accounts:authenticate(Email, Password) of
+        {ok, User} ->
+            {ok, Token} = {{app}}_accounts:issue_token(User),
+            ValidFor = nova_auth:config({{app}}_auth, session_validity_days) * 86400,
+            {json, 201, #{}, #{
+                ~"token" => Token, ~"token_type" => ~"Bearer", ~"expires_in" => ValidFor
+            }};
+        {error, invalid_credentials} ->
+            {json, 401, #{}, #{~"error" => ~"invalid email or password"}}
+    end;
+login(_Req) ->
+    {json, 400, #{}, #{~"error" => ~"expected email and password"}}.
+
+logout(Req) ->
+    {ok, Token} = {{app}}_auth_security:bearer_token(Req),
+    ok = {{app}}_accounts:revoke_token(Token),
+    {status, 204}.
+
+me(#{auth_data := User}) ->
+    {json, user_json(User)}.
+
+user_json(#{id := Id, email := Email}) ->
+    #{~"id" => Id, ~"email" => Email}.
+
+errors_json(Errors) ->
+    Fields = lists:usort([Field || {Field, _} <- Errors]),
+    maps:from_list([
+        {atom_to_binary(Field), [Message || {F, Message} <- Errors, F =:= Field]}
+     || Field <- Fields
+    ]).

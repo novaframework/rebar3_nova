@@ -1,0 +1,86 @@
+-module({{app}}_user).
+-behaviour(kura_schema).
+-include_lib("kura/include/kura.hrl").
+
+-export([table/0, fields/0, indexes/0]).
+-export([registration_changeset/2, normalize_email/1]).
+
+table() -> ~"users".
+
+fields() ->
+    [
+        #kura_field{name = id, type = id, primary_key = true, nullable = false},
+        #kura_field{name = email, type = string, nullable = false},
+        #kura_field{name = hashed_password, type = string, nullable = false},
+        #kura_field{name = confirmed_at, type = utc_datetime},
+        #kura_field{name = inserted_at, type = utc_datetime},
+        #kura_field{name = updated_at, type = utc_datetime},
+        #kura_field{name = password, type = string, virtual = true}
+    ].
+
+indexes() ->
+    [{[email], #{unique => true}}].
+
+registration_changeset(Data, Params) ->
+    CS = kura_changeset:cast(?MODULE, Data, Params, [email, password]),
+    CS1 = kura_changeset:validate_required(CS, [email, password]),
+    CS2 = validate_email(CS1),
+    CS3 = validate_password(CS2),
+    scrub_password(hash_password(CS3)).
+
+normalize_email(Email) when is_binary(Email) ->
+    case unicode:characters_to_nfc_binary(Email) of
+        Normalized when is_binary(Normalized) ->
+            {ok, string:casefold(string:trim(Normalized))};
+        _ ->
+            {error, invalid_encoding}
+    end;
+normalize_email(_Email) ->
+    {error, invalid_encoding}.
+
+validate_email(CS) ->
+    CS1 =
+        case kura_changeset:get_change(CS, email) of
+            undefined ->
+                CS;
+            Email ->
+                case normalize_email(Email) of
+                    {ok, Normalized} -> kura_changeset:put_change(CS, email, Normalized);
+                    {error, invalid_encoding} -> kura_changeset:add_error(CS, email, ~"is invalid")
+                end
+        end,
+    CS2 = kura_changeset:validate_format(CS1, email, ~"^[^@\\s]+@[^@\\s]+\\.[^@\\s]+\\z"),
+    kura_changeset:validate_length(CS2, email, [{max, 160}]).
+
+validate_password(CS) ->
+    case kura_changeset:get_change(CS, password) of
+        undefined ->
+            CS;
+        Password when is_binary(Password) ->
+            case string:length(Password) of
+                Length when Length < 12 ->
+                    kura_changeset:add_error(CS, password, ~"should be at least 12 character(s)");
+                Length when Length > 1024 ->
+                    kura_changeset:add_error(CS, password, ~"should be at most 1024 character(s)");
+                _ ->
+                    CS
+            end;
+        _ ->
+            kura_changeset:add_error(CS, password, ~"is invalid")
+    end.
+
+hash_password(#kura_changeset{valid = true} = CS) ->
+    case kura_changeset:get_change(CS, password) of
+        undefined ->
+            CS;
+        Password ->
+            kura_changeset:put_change(CS, hashed_password, nova_auth_password:hash(Password))
+    end;
+hash_password(CS) ->
+    CS.
+
+scrub_password(#kura_changeset{changes = Changes, params = Params} = CS) ->
+    CS#kura_changeset{
+        changes = maps:remove(password, Changes),
+        params = maps:remove(password, Params)
+    }.

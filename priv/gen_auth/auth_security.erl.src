@@ -1,0 +1,29 @@
+-module({{app}}_auth_security).
+
+-export([require_bearer/1, bearer_token/1]).
+
+require_bearer(Req) ->
+    case bearer_token(Req) of
+        {ok, Token} ->
+            case {{app}}_accounts:user_for_token(Token) of
+                {ok, User} -> {true, User};
+                {error, _} -> unauthorized(~"invalid or expired token")
+            end;
+        error ->
+            unauthorized(~"missing bearer token")
+    end.
+
+bearer_token(Req) ->
+    case cowboy_req:header(~"authorization", Req) of
+        <<Scheme:6/binary, " ", Token/binary>> ->
+            case string:lowercase(Scheme) of
+                ~"bearer" -> {ok, string:trim(Token)};
+                _ -> error
+            end;
+        _ ->
+            error
+    end.
+
+unauthorized(Message) ->
+    Headers = #{~"content-type" => ~"application/json", ~"www-authenticate" => ~"Bearer"},
+    {false, 401, Headers, iolist_to_binary(json:encode(#{~"error" => Message}))}.
