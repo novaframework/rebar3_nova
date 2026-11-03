@@ -2,37 +2,51 @@
 
 [
  {kernel, [
-           {logger_level, info},
-           {logger,
-            [{handler, default, logger_std_h,
-              #{level => error,
-                config => #{file => "log/erlang.log"}}}
-            ]}
-          ]},
- {nova, [
-         {use_stacktrace, false},
-         {environment, prod},
-         {cowboy_configuration, #{
-                                  port => 8080
-                                 }},
-         {dev_mode, false},
-         {bootstrap_application, {{name}}},
-         {plugins, [
-                    {pre_request, nova_request_plugin, #{decode_json_body => true}}
-                   ]}
-        ]},
- {arizona_nova, [
-     {pubsub_scope, nova_scope},
-     {live_reload, false}
+     {logger_level, info},
+     {logger, [
+         {handler, default, logger_std_h, #{
+             level => error,
+             config => #{file => "log/erlang.log"}
+         }}
+     ]}
  ]},
- {{{name}}, [
-     {{{name}}_repo, #{
-         pool_size => 20,
-         database => "${DB_NAME}",
-         user => "${DB_USER}",
-         password => "${DB_PASSWORD}",
-         host => "${DB_HOST}",
-         port => 5432
+ {nova, [
+     {use_stacktrace, false},
+     {environment, prod},
+     {cowboy_configuration, #{
+         port => 8080,
+         middleware_handlers => [
+             arizona_cowboy_middleware,
+             nova_router,
+             nova_plugin_handler,
+             nova_security_handler,
+             nova_handler,
+             nova_plugin_handler
+         ]
+     }},
+     {bootstrap_application, {{name}}},
+     {plugins, [
+         {pre_request, nova_request_plugin, #{decode_json_body => true}}
+     ]}
+ ]},
+ {arizona_nova, [
+     {routes, [
+         {live, ~"/", {{name}}_home_live, #{layouts => [{ {{name}}_layout, render}]}},
+         {ws, ~"/live/ws", #{}},
+         {asset, ~"/assets/arizona", {priv_dir, arizona, "static/assets/js"}}
+     ]}
+ ]},
+ {kura, [
+     {repos, #{
+         {{name}}_repo => #{
+             backend => kura_backend_postgres,
+             host => "${DB_HOST}",
+             port => ${DB_PORT:-5432},
+             database => "${DB_NAME}",
+             user => "${DB_USER}",
+             password => "${DB_PASSWORD}",
+             pool_size => ${DB_POOL_SIZE:-10}
+         }
      }}
  ]}
 ].

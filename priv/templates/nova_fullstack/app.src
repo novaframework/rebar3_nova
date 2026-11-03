@@ -10,6 +10,7 @@
         stdlib,
         nova,
         kura,
+        kura_postgres,
         arizona_nova
     ]},
     {env, []},
