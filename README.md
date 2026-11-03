@@ -224,6 +224,8 @@ Warns if `bootstrap_application` is not set.
 
 Checks compiled routes for common security issues and prints findings grouped by severity.
 
+`audit` and `openapi` read Nova's route records as nova 0.18.1 defines them. A route whose handler they do not recognise, as a later nova that changes those records would cause, is left out of the report and named in a warning; upgrade rebar3_nova when you see one.
+
 ```
 $ rebar3 nova audit
 

@@ -29,6 +29,7 @@ init(State) ->
 do(State) ->
     AppName = rebar3_nova_utils:get_app_name(State),
     Dispatch = rebar3_nova_utils:compile_routes(State, AppName),
+    ok = rebar3_nova_dispatch:warn_unknown(Dispatch),
     Routes = collect_routes(Dispatch),
 
     {Warnings, Infos} = classify_findings(Routes),

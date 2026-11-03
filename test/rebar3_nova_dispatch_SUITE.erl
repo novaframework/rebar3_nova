@@ -28,7 +28,8 @@
     openapi_same_basename_schemas_do_not_collide/1,
     openapi_component_name_collision_is_an_error/1,
     openapi_unknown_schema_gets_no_ref/1,
-    openapi_default_output_is_not_served/1
+    openapi_default_output_is_not_served/1,
+    unrecognised_handlers_are_reported/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -56,7 +57,8 @@ all() ->
         openapi_same_basename_schemas_do_not_collide,
         openapi_component_name_collision_is_an_error,
         openapi_unknown_schema_gets_no_ref,
-        openapi_default_output_is_not_served
+        openapi_default_output_is_not_served,
+        unrecognised_handlers_are_reported
     ].
 
 init_per_suite(Config) ->
@@ -410,3 +412,17 @@ openapi_default_output_is_not_served(_Config) ->
     Output = rebar3_nova_openapi:default_output("/app"),
     ?assertEqual("/app/priv/openapi/openapi.json", Output),
     ?assertEqual(nomatch, string:find(Output, "priv/assets")).
+
+%% A nova that reshapes its handler records makes routes unknown, and the
+%% tasks would drop them without a word.
+unrecognised_handlers_are_reported(Config) ->
+    ?assertEqual(
+        [],
+        rebar3_nova_dispatch:unknown_routes(rebar3_nova_dispatch:routes(?config(dispatch, Config)))
+    ),
+    Future = {nova_handler_value, test_app, a_later_shape},
+    {ok, Trie} = nova_routing_trie:insert(~"/future", ~"GET", Future, nova_routing_trie:new()),
+    Routes = rebar3_nova_dispatch:routes(Trie),
+    ?assertEqual([{~"/future", ~"GET"}], rebar3_nova_dispatch:unknown_routes(Routes)),
+    ?assertEqual([], rebar3_nova_openapi:collect_routes(Trie)),
+    ?assertEqual([], rebar3_nova_audit:collect_routes(Trie)).

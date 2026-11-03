@@ -65,6 +65,7 @@ do(State) ->
     Prefix = proplists:get_value(prefix, Args, ""),
 
     Dispatch = rebar3_nova_utils:compile_routes(State, AppName),
+    ok = rebar3_nova_dispatch:warn_unknown(Dispatch),
     Routes = collect_routes(Dispatch, unicode:characters_to_binary(Prefix)),
 
     Schemas = load_schemas(AppDir),
