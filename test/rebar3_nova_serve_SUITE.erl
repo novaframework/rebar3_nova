@@ -14,8 +14,7 @@
     prefixed_app_keeps_its_prefix/1,
     other_modules_leave_routes_alone/1,
     nova_apps_options_survive_a_reload/1,
-    nested_nova_apps_options_survive_a_reload/1,
-    deny/1
+    nested_nova_apps_options_survive_a_reload/1
 ]).
 
 -define(APP, rebar3_nova).
@@ -120,13 +119,10 @@ nested_nova_apps_options_survive_a_reload(_Config) ->
     application:set_env(?PARENT, nova_apps, [{?APP, sub_app_options()}]),
     assert_reload_keeps(sub_app_options()).
 
-deny(_Req) ->
-    false.
-
 sub_app_options() ->
     #{
         prefix => "/admin",
-        secure => fun ?MODULE:deny/1,
+        secure => fun test_security:deny/1,
         plugin_strategy => {override, [{pre_request, nova_request_plugin, #{}}]}
     }.
 
@@ -137,5 +133,5 @@ assert_reload_keeps(Options) ->
     ?assertEqual([?APP], rebar3_nova_serve:reload_routes(?ROUTER)),
     {ok, _, #nova_handler_value{secure = Secure, plugins = Plugins}} =
         nova_router:lookup_url('_', ~"/admin/b", ~"GET"),
-    ?assertEqual(fun ?MODULE:deny/1, Secure),
+    ?assertEqual(fun test_security:deny/1, Secure),
     ?assertEqual([{pre_request, [{fun nova_request_plugin:pre_request/4, #{}}]}], Plugins).

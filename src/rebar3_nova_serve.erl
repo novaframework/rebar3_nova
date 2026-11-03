@@ -263,8 +263,8 @@ reload_app(App, Prefix) ->
 %% (prefix, secure, plugins, plugin_strategy, ...), found the way Nova
 %% resolves nested nova_apps: depth first from the bootstrap application.
 app_options(App, Prefix) ->
-    case application:get_env(nova, bootstrap_application) of
-        {ok, Bootstrap} when is_atom(Bootstrap), Bootstrap =/= App ->
+    case nova:get_main_app() of
+        {ok, Bootstrap} when Bootstrap =/= App ->
             case declared_options(App, nova_apps(Bootstrap), [Bootstrap]) of
                 {found, Options} -> Options;
                 {not_found, _Seen} -> prefix_options(Prefix)

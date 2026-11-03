@@ -235,7 +235,7 @@ auth_rate_limit_proxy_variant_trusts_only_proxies(Config) ->
 
 auth_token_schema_has_the_refresh_fields(Config) ->
     Token = compile_source(Config, "blog_user_token", render_auth("user_token.erl.src")),
-    Types = maps:from_list([{F#kura_field.name, F#kura_field.type} || F <- Token:fields()]),
+    Types = #{F#kura_field.name => F#kura_field.type || F <- Token:fields()},
     ?assertMatch(#{family_id := string, used_at := utc_datetime}, Types).
 
 auth_registration_needs_a_matching_confirmation(Config) ->
@@ -298,18 +298,18 @@ render_auth(Template) ->
 
 %% The commented-out trusted-proxy client_ip/1 in the rate-limit plugin, as a
 %% module of its own.
+-spec proxy_variant(binary()) -> binary().
 proxy_variant(Source) ->
-    Lines = string:split(Source, ~"\n", all),
-    {_, Variant} = lists:splitwith(fun(L) -> L =/= ~"%% client_ip(Req) ->" end, Lines),
-    Commented = lists:takewhile(fun(L) -> string:prefix(L, ~"%%") =/= nomatch end, Variant),
-    iolist_to_binary([
-        "-module(blog_proxy_ip).\n\n-export([client_ip/1]).\n\n",
-        lists:join("\n", [uncomment(L) || L <- Commented]),
-        "\n"
-    ]).
+    [_, After] = binary:split(Source, ~"\n%% client_ip(Req) ->\n"),
+    Body = uncomment([~"%% client_ip(Req) ->" | binary:split(After, ~"\n", [global])]),
+    Header = ~"-module(blog_proxy_ip).\n\n-export([client_ip/1]).\n\n",
+    iolist_to_binary([Header | [[Line, ~"\n"] || Line <- Body]]).
 
-uncomment(~"%%") -> ~"";
-uncomment(<<"%% ", Line/binary>>) -> Line.
+%% The comment block at the head of Lines, without its comment markers.
+-spec uncomment([binary()]) -> [binary()].
+uncomment([~"%%" | Lines]) -> [~"" | uncomment(Lines)];
+uncomment([<<"%% ", Line/binary>> | Lines]) -> [Line | uncomment(Lines)];
+uncomment(_) -> [].
 
 proxied_req(Peer, ForwardedFor) ->
     #{peer => {Peer, 443}, headers => #{~"x-forwarded-for" => ForwardedFor}}.

@@ -82,16 +82,15 @@ tasks leave those routes out of their reports.
 """.
 -spec warn_unknown(nova_routing_trie:trie()) -> ok.
 warn_unknown(Dispatch) ->
-    lists:foreach(
-        fun({Path, Method}) ->
-            rebar_api:warn(
-                "Route ~ts ~ts has a handler this rebar3_nova does not recognise, so it is left "
-                "out. The project's nova is probably newer than the plugin: upgrade rebar3_nova.",
-                [string:uppercase(method_to_binary(Method)), Path]
-            )
-        end,
-        unknown_routes(routes(Dispatch))
-    ).
+    _ = [
+        rebar_api:warn(
+            "Route ~ts ~ts has a handler this rebar3_nova does not recognise, so it is left "
+            "out. The project's nova is probably newer than the plugin: upgrade rebar3_nova.",
+            [string:uppercase(method_to_binary(Method)), Path]
+        )
+     || {Path, Method} <- unknown_routes(routes(Dispatch))
+    ],
+    ok.
 
 fun_handler(Fun) ->
     {module, Module} = erlang:fun_info(Fun, module),

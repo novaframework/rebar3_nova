@@ -85,7 +85,7 @@ format_error(Reason) ->
 Where the spec goes without `--output`. Not `priv/assets`, which the
 scaffold serves, so the route map is only published on purpose.
 """.
--spec default_output(file:filename()) -> file:filename().
+-spec default_output(file:filename_all()) -> file:filename_all().
 default_output(AppDir) ->
     filename:join([AppDir, "priv", "openapi", "openapi.json"]).
 
