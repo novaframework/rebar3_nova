@@ -49,8 +49,9 @@ short_password_is_rejected(_Config) ->
 me_needs_a_token(_Config) ->
     ?assertMatch({401, _}, request(get, "/api/me", ~"invalid")).
 
+%% The users stay in the database, so each run needs fresh addresses.
 unique_email() ->
-    iolist_to_binary(["user", integer_to_list(erlang:unique_integer([positive])), "@example.com"]).
+    <<"user-", (binary:encode_hex(crypto:strong_rand_bytes(8), lowercase))/binary, "@example.com">>.
 
 password() ->
     ~"correct horse battery staple".
