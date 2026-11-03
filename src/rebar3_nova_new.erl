@@ -836,6 +836,8 @@ sys_config_db(_Name, _Env, _Flags) ->
 sys_config_arizona(Name, #{arizona := true}) ->
     [
         " {arizona_nova, [\n",
+        "     %% These routes are served by arizona_cowboy_middleware, before nova_router,\n",
+        "     %% so the global Nova plugins (CSRF, auth, headers, otel) do not run on them.\n",
         "     {routes, [\n",
         "         {live, ~\"/\", ",
         Name,

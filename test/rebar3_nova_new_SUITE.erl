@@ -194,6 +194,12 @@ arizona_flag(_Config) ->
     assert_not_contains(Router, "arizona_nova_adapter"),
     assert_not_contains(Router, "main_controller"),
 
+    [
+        assert_contains(
+            read_file(Name, "config/" ++ Env ++ "_sys.config.src"), "before nova_router"
+        )
+     || Env <- ["dev", "prod"]
+    ],
     {ok, [DevTerms]} = file:consult(filename:join([Name, "config", "dev_sys.config.src"])),
     ?assertEqual(undefined, prop(arizona_core, DevTerms)),
     #{middleware_handlers := [arizona_cowboy_middleware, nova_router | _]} =
@@ -457,6 +463,10 @@ template_sys_configs_are_valid_terms(_Config) ->
     [
         ?assert(lists:all(fun is_tuple/1, prop(kernel, render_template_config(File))), File)
      || File <- template_sys_configs()
+    ],
+    [
+        assert_contains(read_file(templates_dir(), "nova_fullstack/" ++ File), "before nova_router")
+     || File <- ["dev_sys.config.src", "prod_sys.config.src"]
     ],
     Terms = render_template_config("nova_fullstack/dev_sys.config.src"),
     #{app_repo := #{backend := kura_backend_postgres}} =

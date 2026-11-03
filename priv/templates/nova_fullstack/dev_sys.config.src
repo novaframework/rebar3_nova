@@ -36,6 +36,8 @@
      ]}
  ]},
  {arizona_nova, [
+     %% These routes are served by arizona_cowboy_middleware, before nova_router,
+     %% so the global Nova plugins (CSRF, auth, headers, otel) do not run on them.
      {routes, [
          {live, ~"/", {{name}}_home_live, #{layouts => [{ {{name}}_layout, render}]}},
          {ws, ~"/live/ws", #{}},
