@@ -531,8 +531,14 @@ dockerfile_runs_unprivileged(_Config) ->
     Dockerfile = read_file(Name, "Dockerfile"),
     [_Builder, Runtime] = string:split(Dockerfile, "\nFROM ", trailing),
     assert_contains(Runtime, "useradd --system --uid 10001"),
-    assert_contains(Runtime, "COPY --from=builder --chown=app:app"),
+    %% The release stays owned by root, so the app cannot rewrite its own code;
+    %% it writes only the rendered configs in releases/<vsn> and its logs.
+    assert_contains(Runtime, "COPY --from=builder /app/_build/prod/rel/testapp_dockeruser ./\n"),
+    assert_not_contains(Runtime, "--chown"),
+    assert_not_contains(Runtime, "chown app:app /app"),
+    assert_contains(Runtime, "RUN mkdir log && chown app:app log releases/*/\n"),
     assert_contains(Runtime, "\nUSER app\n"),
+    assert_contains(Runtime, "-e RELEASE_COOKIE="),
     ?assertMatch(
         {match, _},
         re:run(Dockerfile, "^FROM erlang:29@sha256:[0-9a-f]{64} AS builder$", [multiline])
