@@ -311,7 +311,7 @@ Summary: 67 ok, 2 warning(s), 0 error(s)
 | `config` | `json_lib` (read from the bootstrap app) is loaded and exports `encode/1` and `decode/1`; `{json_lib, json}` is an error with a Nova whose request decoding expects `{ok, Term}`; `json_lib` set under `nova`; Cowboy port; `session_manager`, `use_sessions`, and the unused `session_backend` key |
 | `routes` | Every compiled route resolves to an exported handler (or captured fun); flags duplicate `{method, path}` pairs |
 | `deps` | `rebar.lock` committed, active profiles |
-| `security` | `erl_crash.dump` and `.env` presence vs `.gitignore` |
+| `security` | `erl_crash.dump` and `.env` presence vs `.gitignore` (a whole line, so `.envrc` does not count), and a literal `-setcookie` in `config/vm.args(.src)` |
 | `build` | `_build/default` and app `ebin` exist |
 
 **Options:**

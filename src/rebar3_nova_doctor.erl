@@ -10,7 +10,8 @@
     summarize/1,
     section_status/1,
     parse_csv/1,
-    config_findings/3
+    config_findings/3,
+    security_findings/1
 ]).
 -endif.
 
@@ -388,24 +389,24 @@ check_deps(State) ->
     [LockFinding, ProfileFinding].
 
 check_security(State) ->
-    Dir = rebar3_nova_utils:get_app_dir(State),
-    Gitignore = filename:join(Dir, ".gitignore"),
-    GitignoreContent =
-        case file:read_file(Gitignore) of
-            {ok, B} -> B;
+    security_findings(rebar3_nova_utils:get_app_dir(State)).
+
+security_findings(Dir) ->
+    Gitignore =
+        case file:read_file(filename:join(Dir, ".gitignore")) of
+            {ok, Content} -> Content;
             _ -> <<>>
         end,
-    Crash = filename:join(Dir, "erl_crash.dump"),
     CrashFinding =
-        case filelib:is_regular(Crash) of
+        case filelib:is_regular(filename:join(Dir, "erl_crash.dump")) of
             false ->
                 {ok, "no erl_crash.dump in project root"};
             true ->
-                case binary:match(GitignoreContent, <<"erl_crash.dump">>) of
-                    nomatch ->
+                case is_ignored(Gitignore, ~"erl_crash.dump") of
+                    false ->
                         {warn, "erl_crash.dump in project root, not gitignored",
                             "Add `erl_crash.dump` to .gitignore"};
-                    _ ->
+                    true ->
                         {warn, "erl_crash.dump in project root", "Delete it (already gitignored)"}
                 end
         end,
@@ -414,15 +415,43 @@ check_security(State) ->
             false ->
                 {ok, "no .env in project root"};
             true ->
-                case binary:match(GitignoreContent, <<".env">>) of
-                    nomatch ->
+                case is_ignored(Gitignore, ~".env") of
+                    false ->
                         {error, ".env present but not gitignored",
                             "Add `.env` to .gitignore immediately"};
-                    _ ->
+                    true ->
                         {ok, ".env present and gitignored"}
                 end
         end,
-    [CrashFinding, EnvFinding].
+    [CrashFinding, EnvFinding | cookie_findings(Dir)].
+
+%% A whole .gitignore line names the file; `.envrc` or `!.env` does not
+%% ignore `.env`.
+is_ignored(Gitignore, Name) ->
+    Lines = [string:trim(Line) || Line <- binary:split(Gitignore, ~"\n", [global])],
+    lists:member(Name, Lines) orelse lists:member(<<"/", Name/binary>>, Lines).
+
+%% A cookie written into vm.args is the same for every install of the
+%% project and readable by anyone with the repository.
+cookie_findings(Dir) ->
+    [
+        {error, io_lib:format("~s sets a literal distribution cookie", [File]),
+            "Read it from the environment, e.g. `-setcookie ${RELEASE_COOKIE}`, or drop the line"}
+     || File <- ["config/vm.args.src", "config/vm.args"],
+        {ok, Content} <- [file:read_file(filename:join(Dir, File))],
+        has_literal_cookie(Content)
+    ].
+
+has_literal_cookie(VmArgs) ->
+    lists:any(
+        fun(Line) ->
+            case string:lexemes(Line, " \t\r") of
+                [~"-setcookie", Cookie | _] -> string:find(Cookie, ~"${") =:= nomatch;
+                _ -> false
+            end
+        end,
+        binary:split(VmArgs, ~"\n", [global])
+    ).
 
 check_build(State) ->
     Dir = rebar3_nova_utils:get_app_dir(State),

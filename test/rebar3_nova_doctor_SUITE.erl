@@ -5,6 +5,8 @@
 
 -export([all/0]).
 -export([
+    security_env_needs_an_exact_gitignore_line/1,
+    security_flags_a_literal_cookie/1,
     parse_csv_empty/1,
     parse_csv_single/1,
     parse_csv_multiple/1,
@@ -48,7 +50,9 @@ all() ->
         config_json_lib_under_nova_warns,
         config_session_manager_default_is_ok,
         config_session_backend_warns,
-        config_sessions_disabled
+        config_sessions_disabled,
+        security_env_needs_an_exact_gitignore_line,
+        security_flags_a_literal_cookie
     ].
 
 %%======================================================================
@@ -167,3 +171,50 @@ warnings(Config) ->
 
 ok_messages(Config) ->
     [lists:flatten(Msg) || {ok, Msg} <- findings(Config, ok)].
+
+%%======================================================================
+%% security_findings/1
+%%======================================================================
+
+security_env_needs_an_exact_gitignore_line(Config) ->
+    Dir = project(Config, "env", [{".env", "SECRET=1\n"}, {".gitignore", "_build\n.envrc\n"}]),
+    ?assertMatch([{error, ".env present but not gitignored", _}], env_findings(Dir)),
+    ok = file:write_file(filename:join(Dir, ".gitignore"), "_build\n.env\n"),
+    ?assertEqual([{ok, ".env present and gitignored"}], env_findings(Dir)),
+    ok = file:write_file(filename:join(Dir, ".gitignore"), "/.env\n"),
+    ?assertEqual([{ok, ".env present and gitignored"}], env_findings(Dir)).
+
+security_flags_a_literal_cookie(Config) ->
+    Literal = project(Config, "cookie", [
+        {"config/vm.args.src", "-name app\n-setcookie app_cookie\n"}
+    ]),
+    ?assertMatch([{error, _, _}], cookie_errors(Literal)),
+    FromEnv = project(Config, "env_cookie", [
+        {"config/vm.args.src", "-name app\n-setcookie ${RELEASE_COOKIE}\n"}
+    ]),
+    ?assertEqual([], cookie_errors(FromEnv)),
+    None = project(Config, "no_cookie", [{"config/vm.args.src", "-name app\n## -setcookie x\n"}]),
+    ?assertEqual([], cookie_errors(None)).
+
+project(Config, Name, Files) ->
+    Dir = filename:join(?config(priv_dir, Config), Name),
+    [write(filename:join(Dir, File), Content) || {File, Content} <- Files],
+    Dir.
+
+write(Path, Content) ->
+    ok = filelib:ensure_dir(Path),
+    ok = file:write_file(Path, Content).
+
+env_findings(Dir) ->
+    [
+        F
+     || F <- rebar3_nova_doctor:security_findings(Dir),
+        string:find(element(2, F), ".env") =/= nomatch
+    ].
+
+cookie_errors(Dir) ->
+    [
+        F
+     || {error, Message, _} = F <- rebar3_nova_doctor:security_findings(Dir),
+        string:find(Message, "cookie") =/= nomatch
+    ].
