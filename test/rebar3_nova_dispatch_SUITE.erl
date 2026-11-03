@@ -29,7 +29,10 @@
     openapi_component_name_collision_is_an_error/1,
     openapi_unknown_schema_gets_no_ref/1,
     openapi_default_output_is_not_served/1,
-    unrecognised_handlers_are_reported/1
+    unrecognised_handlers_are_reported/1,
+    audit_compiles_the_requested_environment/1,
+    audit_covers_the_nova_apps_in_the_config/1,
+    audit_strict_fails_on_a_warning/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -58,7 +61,10 @@ all() ->
         openapi_component_name_collision_is_an_error,
         openapi_unknown_schema_gets_no_ref,
         openapi_default_output_is_not_served,
-        unrecognised_handlers_are_reported
+        unrecognised_handlers_are_reported,
+        audit_compiles_the_requested_environment,
+        audit_covers_the_nova_apps_in_the_config,
+        audit_strict_fails_on_a_warning
     ].
 
 init_per_suite(Config) ->
@@ -426,3 +432,58 @@ unrecognised_handlers_are_reported(Config) ->
     ?assertEqual([{~"/future", ~"GET"}], rebar3_nova_dispatch:unknown_routes(Routes)),
     ?assertEqual([], rebar3_nova_openapi:collect_routes(Trie)),
     ?assertEqual([], rebar3_nova_audit:collect_routes(Trie)).
+
+%% A route only routes(prod) returns used to be invisible: the audit always
+%% compiled the dev routes.
+audit_compiles_the_requested_environment(_Config) ->
+    with_prod_only_route(fun() ->
+        #{warnings := Prod, coverage := Coverage} = rebar3_nova_audit:audit(rebar3_nova, prod, []),
+        #{warnings := Dev} = rebar3_nova_audit:audit(rebar3_nova, dev, []),
+        ?assertEqual(1, length(mentioning("/admin", Prod))),
+        ?assertEqual([], mentioning("/admin", Dev)),
+        ?assertNotEqual(nomatch, string:find(Coverage, "routes(prod) of rebar3_nova"))
+    end).
+
+audit_covers_the_nova_apps_in_the_config(_Config) ->
+    Config = [
+        {rebar3_nova, [{nova_apps, [{rebar3_nova_audit_sub, #{prefix => "/sub"}}]}]},
+        {rebar3_nova_audit_sub, [{router_module, rebar3_nova_test_router}]},
+        {arizona_nova, [{routes, []}]}
+    ],
+    with_prod_only_route(fun() ->
+        try
+            #{warnings := Warnings, coverage := Coverage} =
+                rebar3_nova_audit:audit(rebar3_nova, prod, Config),
+            ?assertEqual(1, length(mentioning("/sub/admin", Warnings))),
+            ?assertNotEqual(
+                nomatch, string:find(Coverage, "of rebar3_nova, rebar3_nova_audit_sub")
+            ),
+            ?assertNotEqual(nomatch, string:find(Coverage, "arizona_nova routes"))
+        after
+            application:unset_env(rebar3_nova_audit_sub, router_module)
+        end
+    end).
+
+audit_strict_fails_on_a_warning(_Config) ->
+    with_prod_only_route(fun() ->
+        Options = #{env => prod, config => []},
+        ?assertEqual(ok, rebar3_nova_audit:run(rebar3_nova, Options#{strict => false})),
+        ?assertMatch({error, _}, rebar3_nova_audit:run(rebar3_nova, Options#{strict => true})),
+        ?assertEqual(
+            ok, rebar3_nova_audit:run(rebar3_nova, #{env => dev, config => [], strict => true})
+        )
+    end).
+
+with_prod_only_route(Fun) ->
+    rebar3_nova_test_router:set_routes(fun
+        (prod) -> [#{routes => [{"/admin", fun test_controller:admin/1, #{methods => [post]}}]}];
+        (_) -> []
+    end),
+    try
+        Fun()
+    after
+        rebar3_nova_test_router:set_routes(routes())
+    end.
+
+mentioning(Text, Lines) ->
+    [Line || Line <- Lines, string:find(Line, Text) =/= nomatch].

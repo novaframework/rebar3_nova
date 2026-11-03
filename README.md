@@ -228,14 +228,16 @@ Warns if `bootstrap_application` is not set.
 
 ### `nova audit` — Audit route security
 
-Checks compiled routes for common security issues and prints findings grouped by severity.
+Checks compiled routes for common security issues and prints findings grouped by severity. The routes are those of the application and of the `nova_apps` declared for it in sys.config (nested ones included), compiled for one Nova environment, so routes that `routes(prod)` returns are audited with `--env prod`. The first line of the report says what was audited and what was not.
 
 `audit` and `openapi` read Nova's route records as nova 0.18.1 defines them. A route whose handler they do not recognise, as a later nova that changes those records would cause, is left out of the report and named in a warning; upgrade rebar3_nova when you see one.
 
 ```
-$ rebar3 nova audit
+$ rebar3 nova audit --env prod
 
 === Security Audit ===
+
+  Audited routes(prod) of myapp. Not covered: static files and error pages.
 
   WARNINGS:
     POST /users (myapp_users_controller) has no security
@@ -249,12 +251,20 @@ $ rebar3 nova audit
   Summary: 3 warning(s), 2 info(s)
 ```
 
+**Options:**
+
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `--env`, `-e` | no | `dev` | Nova environment passed to the routers' `routes/1` |
+| `--config`, `-c` | no | the shell config | sys.config to read `nova_apps` (and `router_module`) from |
+| `--strict`, `-s` | no | `false` | Fail when there are warnings, for CI |
+
 **Rules checked:**
 - **Warning**: Mutation methods (POST, PUT, DELETE, PATCH) without a security callback
 - **Warning**: Wildcard method (`'_'`) matching all HTTP methods on a route (once per route)
 - **Info**: GET routes without a security callback
 
-Static file routes, error pages and websocket handlers are not audited. Findings are sorted by path and method.
+Static file routes, error pages, websocket and other cowboy handlers, and routes served outside `nova_router` (such as `arizona_nova` routes) are not audited; the coverage line names them. Findings are sorted by path and method.
 
 ### `nova doctor` — Diagnose project health
 

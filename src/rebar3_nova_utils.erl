@@ -10,6 +10,7 @@
     parse_actions/1,
     load_sys_config/1,
     compile_routes/2,
+    compile_app_routes/1,
     router_module/1,
     to_binary/1
 ]).
@@ -83,11 +84,25 @@ application serves. Needs nova 0.18 or later in the project.
 -spec compile_routes(rebar_state:t(), atom()) -> nova_routing_trie:trie().
 compile_routes(State, App) ->
     rebar_paths:set_paths([deps, plugins], State),
-    _ = application:load(App),
+    compile_app_routes([App]).
+
+-doc """
+Compile the routes of `Apps`, entries as in `nova_apps`, with the nova on
+the code path, into a table of their own so earlier compiles do not merge
+in. Aborts when that nova predates `nova_routing_trie`.
+""".
+-spec compile_app_routes([atom() | {atom(), map()}]) -> nova_routing_trie:trie().
+compile_app_routes(Apps) ->
+    _ = [application:load(app_name(App)) || App <- Apps],
     _ = code:ensure_loaded(nova_routing_trie),
     case erlang:function_exported(nova_routing_trie, routes, 1) of
         true ->
-            nova_router:compile([App]);
+            Key = {nova_dispatch, rebar3_nova, erlang:unique_integer([positive])},
+            try
+                nova_router:compile(Apps, Key)
+            after
+                nova_router:delete_dispatch(Key)
+            end;
         false ->
             rebar_api:abort(
                 "rebar3_nova reads routes with nova_routing_trie, which needs nova 0.18 or "
@@ -95,6 +110,9 @@ compile_routes(State, App) ->
                 []
             )
     end.
+
+app_name({App, _Options}) -> App;
+app_name(App) -> App.
 
 -doc "Text as a UTF-8 binary.".
 -spec to_binary(unicode:chardata()) -> binary().
