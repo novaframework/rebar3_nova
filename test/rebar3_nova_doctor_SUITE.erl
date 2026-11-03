@@ -3,10 +3,12 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
+-export([end_per_testcase/2]).
 -export([all/0]).
 -export([
     security_env_needs_an_exact_gitignore_line/1,
     security_flags_a_literal_cookie/1,
+    security_asks_git_about_env/1,
     parse_csv_empty/1,
     parse_csv_single/1,
     parse_csv_multiple/1,
@@ -52,8 +54,13 @@ all() ->
         config_session_backend_warns,
         config_sessions_disabled,
         security_env_needs_an_exact_gitignore_line,
-        security_flags_a_literal_cookie
+        security_flags_a_literal_cookie,
+        security_asks_git_about_env
     ].
+
+end_per_testcase(_Case, _Config) ->
+    true = os:unsetenv("GIT_CEILING_DIRECTORIES"),
+    ok.
 
 %%======================================================================
 %% parse_csv/1
@@ -177,6 +184,7 @@ ok_messages(Config) ->
 %%======================================================================
 
 security_env_needs_an_exact_gitignore_line(Config) ->
+    outside_git(Config),
     Dir = project(Config, "env", [{".env", "SECRET=1\n"}, {".gitignore", "_build\n.envrc\n"}]),
     ?assertMatch([{error, ".env present but not gitignored", _}], env_findings(Dir)),
     ok = file:write_file(filename:join(Dir, ".gitignore"), "_build\n.env\n"),
@@ -193,8 +201,26 @@ security_flags_a_literal_cookie(Config) ->
         {"config/vm.args.src", "-name app\n-setcookie ${RELEASE_COOKIE}\n"}
     ]),
     ?assertEqual([], cookie_errors(FromEnv)),
+    [{error, _, Hint}] = cookie_errors(Literal),
+    ?assertEqual(nomatch, string:find(Hint, "drop the line")),
+    ?assertNotEqual(nomatch, string:find(Hint, "set RELEASE_COOKIE")),
     None = project(Config, "no_cookie", [{"config/vm.args.src", "-name app\n## -setcookie x\n"}]),
     ?assertEqual([], cookie_errors(None)).
+
+%% A pattern only git understands.
+security_asks_git_about_env(Config) ->
+    outside_git(Config),
+    Dir = project(Config, "git_env", [{".env", "SECRET=1\n"}, {".gitignore", ".env*\n"}]),
+    ?assertMatch([{error, ".env present but not gitignored", _}], env_findings(Dir)),
+    [] = os:cmd("git init -q " ++ Dir),
+    ?assertEqual([{ok, ".env present and gitignored"}], env_findings(Dir)),
+    ok = file:write_file(filename:join(Dir, ".gitignore"), ".env*\n!.env\n"),
+    ?assertMatch([{error, ".env present but not gitignored", _}], env_findings(Dir)).
+
+%% The suite runs inside this repository, which ignores _build; git must
+%% not look above the test projects.
+outside_git(Config) ->
+    true = os:putenv("GIT_CEILING_DIRECTORIES", ?config(priv_dir, Config)).
 
 project(Config, Name, Files) ->
     Dir = filename:join(?config(priv_dir, Config), Name),

@@ -402,7 +402,7 @@ security_findings(Dir) ->
             false ->
                 {ok, "no erl_crash.dump in project root"};
             true ->
-                case is_ignored(Gitignore, ~"erl_crash.dump") of
+                case is_ignored(Dir, Gitignore, ~"erl_crash.dump") of
                     false ->
                         {warn, "erl_crash.dump in project root, not gitignored",
                             "Add `erl_crash.dump` to .gitignore"};
@@ -415,7 +415,7 @@ security_findings(Dir) ->
             false ->
                 {ok, "no .env in project root"};
             true ->
-                case is_ignored(Gitignore, ~".env") of
+                case is_ignored(Dir, Gitignore, ~".env") of
                     false ->
                         {error, ".env present but not gitignored",
                             "Add `.env` to .gitignore immediately"};
@@ -425,9 +425,41 @@ security_findings(Dir) ->
         end,
     [CrashFinding, EnvFinding | cookie_findings(Dir)].
 
-%% A whole .gitignore line names the file; `.envrc` or `!.env` does not
-%% ignore `.env`.
-is_ignored(Gitignore, Name) ->
+%% In a git repository git decides, with every pattern and ignore file it
+%% reads. Outside one, a whole .gitignore line has to name the file;
+%% `.envrc` or `!.env` does not ignore `.env`.
+is_ignored(Dir, Gitignore, Name) ->
+    case git_check_ignore(Dir, Name) of
+        {ok, Ignored} -> Ignored;
+        unknown -> is_listed(Gitignore, Name)
+    end.
+
+-spec git_check_ignore(file:filename(), binary()) -> {ok, boolean()} | unknown.
+git_check_ignore(Dir, Name) ->
+    case os:find_executable("git") of
+        false ->
+            unknown;
+        Git ->
+            Port = open_port({spawn_executable, Git}, [
+                {args, ["-C", Dir, "check-ignore", "-q", "--", Name]},
+                exit_status,
+                stderr_to_stdout,
+                binary
+            ]),
+            case exit_status(Port) of
+                0 -> {ok, true};
+                1 -> {ok, false};
+                _NotARepository -> unknown
+            end
+    end.
+
+exit_status(Port) ->
+    receive
+        {Port, {data, _}} -> exit_status(Port);
+        {Port, {exit_status, Status}} -> Status
+    end.
+
+is_listed(Gitignore, Name) ->
     Lines = [string:trim(Line) || Line <- binary:split(Gitignore, ~"\n", [global])],
     lists:member(Name, Lines) orelse lists:member(<<"/", Name/binary>>, Lines).
 
@@ -436,7 +468,8 @@ is_ignored(Gitignore, Name) ->
 cookie_findings(Dir) ->
     [
         {error, io_lib:format("~s sets a literal distribution cookie", [File]),
-            "Read it from the environment, e.g. `-setcookie ${RELEASE_COOKIE}`, or drop the line"}
+            "Read it from the environment with `-setcookie ${RELEASE_COOKIE}` and set "
+            "RELEASE_COOKIE wherever the release runs"}
      || File <- ["config/vm.args.src", "config/vm.args"],
         {ok, Content} <- [file:read_file(filename:join(Dir, File))],
         has_literal_cookie(Content)
