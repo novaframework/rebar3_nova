@@ -165,7 +165,7 @@ Generates an OpenAPI 3.0.3 JSON specification from compiled controller routes an
 
 ```
 $ rebar3 nova openapi
-===> OpenAPI spec written to /path/to/myapp/priv/openapi/openapi.json
+===> OpenAPI spec written to /path/to/myapp/priv/assets/openapi.json
 
 $ rebar3 nova openapi --prefix /api --output priv/assets/openapi.json
 $ rebar3 nova openapi --title "My API" --api-version 1.0.0
@@ -175,14 +175,14 @@ $ rebar3 nova openapi --title "My API" --api-version 1.0.0
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
-| `--output`, `-o` | no | `priv/openapi/openapi.json` | Output file path |
+| `--output`, `-o` | no | `priv/assets/openapi.json` | Output file path |
 | `--title`, `-t` | no | app name | API title |
 | `--api-version`, `-v` | no | `0.1.0` | API version string |
 | `--prefix`, `-p` | no | (every route) | Only document paths under this prefix, e.g. `/api` |
 
 Responses follow the method: `201` for POST, `204` for DELETE and `200` otherwise, plus `400` when the route has a request schema and `404` when the path has parameters. A route's `extra_state => #{json_schema => "schemas/x.json"}`, the key [nova_json_schemas](https://github.com/novaframework/nova_json_schemas) validates request bodies with, becomes the request body schema of POST, PUT and PATCH operations; it is not used to describe responses. Schemas are read from `priv/schemas` and its subdirectories and named by their relative path, so `priv/schemas/v1/user.json` is the component `v1.user`. `$schema` and `$id` are dropped from the component schemas, which OpenAPI 3.0 does not allow.
 
-The spec lists every route, so by default it goes to `priv/openapi`, which the scaffold does not serve. To publish it, pass `--output` explicitly, e.g. `--output priv/assets/openapi.json` to serve it under `/assets`. No Swagger UI page is written: earlier versions wrote a `swagger.html` that loaded Swagger UI from a CDN. Serve a self-hosted copy if you want one.
+By default the spec goes to `priv/assets`, which the scaffold serves under `/assets`. It lists every route, so pass `--output` with a path outside `priv/assets` to keep it private. No Swagger UI page is written: earlier versions wrote a `swagger.html` that loaded Swagger UI from a CDN. Serve a self-hosted copy if you want one.
 
 ### `nova middleware` — Show plugin/middleware chains
 
@@ -329,7 +329,7 @@ Summary: 67 ok, 2 warning(s), 0 error(s)
 | `config` | `json_lib` (read from the bootstrap app) is loaded and exports `encode/1` and `decode/1`; `{json_lib, json}` is an error with a Nova whose request decoding expects `{ok, Term}`; `json_lib` set under `nova`; Cowboy port; `session_manager`, `use_sessions`, and the unused `session_backend` key |
 | `routes` | Every compiled route resolves to an exported handler (or captured fun); flags duplicate `{method, path}` pairs |
 | `deps` | `rebar.lock` committed, active profiles |
-| `security` | `erl_crash.dump` and `.env` presence vs `.gitignore` (asked of `git check-ignore` in a git repository; otherwise a whole `.gitignore` line, so `.envrc` does not count), and a literal `-setcookie` in `config/vm.args(.src)` |
+| `security` | `erl_crash.dump` and `.env` presence vs `.gitignore` (asked of `git check-ignore` in a git repository; otherwise a whole `.gitignore` line, so `.envrc` does not count), and a literal `-setcookie` in `config/vm.args(.src)` (a warning, so projects from 0.13.4 and earlier still pass) |
 | `build` | `_build/default` and app `ebin` exist |
 
 **Options:**

@@ -192,20 +192,22 @@ security_env_needs_an_exact_gitignore_line(Config) ->
     ok = file:write_file(filename:join(Dir, ".gitignore"), "/.env\n"),
     ?assertEqual([{ok, ".env present and gitignored"}], env_findings(Dir)).
 
+%% A warning, not an error: projects from rebar3_nova 0.13.4 and earlier
+%% have a literal cookie and should still pass doctor.
 security_flags_a_literal_cookie(Config) ->
     Literal = project(Config, "cookie", [
         {"config/vm.args.src", "-name app\n-setcookie app_cookie\n"}
     ]),
-    ?assertMatch([{error, _, _}], cookie_errors(Literal)),
+    ?assertMatch([{warn, _, _}], cookie_findings(Literal)),
     FromEnv = project(Config, "env_cookie", [
         {"config/vm.args.src", "-name app\n-setcookie ${RELEASE_COOKIE}\n"}
     ]),
-    ?assertEqual([], cookie_errors(FromEnv)),
-    [{error, _, Hint}] = cookie_errors(Literal),
+    ?assertEqual([], cookie_findings(FromEnv)),
+    [{warn, _, Hint}] = cookie_findings(Literal),
     ?assertEqual(nomatch, string:find(Hint, "drop the line")),
     ?assertNotEqual(nomatch, string:find(Hint, "set RELEASE_COOKIE")),
     None = project(Config, "no_cookie", [{"config/vm.args.src", "-name app\n## -setcookie x\n"}]),
-    ?assertEqual([], cookie_errors(None)).
+    ?assertEqual([], cookie_findings(None)).
 
 %% A pattern only git understands.
 security_asks_git_about_env(Config) ->
@@ -238,9 +240,9 @@ env_findings(Dir) ->
         string:find(element(2, F), ".env") =/= nomatch
     ].
 
-cookie_errors(Dir) ->
+cookie_findings(Dir) ->
     [
         F
-     || {error, Message, _} = F <- rebar3_nova_doctor:security_findings(Dir),
+     || {_Level, Message, _} = F <- rebar3_nova_doctor:security_findings(Dir),
         string:find(Message, "cookie") =/= nomatch
     ].
