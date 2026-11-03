@@ -9,6 +9,7 @@
     copy_priv_file/2,
     parse_actions/1,
     load_sys_config/1,
+    sys_config_path/1,
     compile_routes/2,
     compile_app_routes/1,
     router_module/1,
@@ -60,14 +61,18 @@ parse_actions(Str) ->
     Tokens = string:tokens(Str, ","),
     [erlang:list_to_atom(string:trim(T)) || T <- Tokens].
 
+-doc "The sys.config `rebar3 shell` uses, `config/dev_sys.config` by default.".
+-spec sys_config_path(rebar_state:t()) -> string().
+sys_config_path(State) ->
+    ShellOpts = rebar_state:get(State, shell, []),
+    case proplists:get_value(config, ShellOpts) of
+        undefined -> "config/dev_sys.config";
+        Path -> lists:flatten(io_lib:format("~ts", [Path]))
+    end.
+
 -spec load_sys_config(rebar_state:t()) -> [{atom(), term()}].
 load_sys_config(State) ->
-    ShellOpts = rebar_state:get(State, shell, []),
-    ConfigPath =
-        case proplists:get_value(config, ShellOpts) of
-            undefined -> "config/dev_sys.config";
-            Path -> Path
-        end,
+    ConfigPath = sys_config_path(State),
     case file:consult(ConfigPath) of
         {ok, [Config]} when is_list(Config) -> Config;
         {ok, Config} when is_list(Config) -> Config;

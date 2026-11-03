@@ -32,7 +32,10 @@
     unrecognised_handlers_are_reported/1,
     audit_compiles_the_requested_environment/1,
     audit_covers_the_nova_apps_in_the_config/1,
-    audit_strict_fails_on_a_warning/1
+    audit_strict_fails_on_a_warning/1,
+    audit_reads_a_prod_config_src/1,
+    audit_names_the_config_and_warns_without_one/1,
+    audit_restores_the_environment/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -64,7 +67,10 @@ all() ->
         unrecognised_handlers_are_reported,
         audit_compiles_the_requested_environment,
         audit_covers_the_nova_apps_in_the_config,
-        audit_strict_fails_on_a_warning
+        audit_strict_fails_on_a_warning,
+        audit_reads_a_prod_config_src,
+        audit_names_the_config_and_warns_without_one,
+        audit_restores_the_environment
     ].
 
 init_per_suite(Config) ->
@@ -473,6 +479,87 @@ audit_strict_fails_on_a_warning(_Config) ->
             ok, rebar3_nova_audit:run(rebar3_nova, #{env => dev, config => [], strict => true})
         )
     end).
+
+%% Unquoted ${VAR:-Default} values, as `rebar3 nova new` writes them for
+%% prod, are not Erlang terms until they are replaced.
+audit_reads_a_prod_config_src(Config) ->
+    Path = filename:join(?config(priv_dir, Config), "prod_sys.config.src"),
+    ok = file:write_file(
+        Path,
+        ~"""
+        %% -*- mode: erlang -*-
+        [
+         {kura, [
+             {ssl, ${DATABASE_SSL:-true}},
+             {repos, #{blog_repo => #{
+                 host => "${DATABASE_HOST}",
+                 port => ${DATABASE_PORT:-5432},
+                 database => "${DATABASE_NAME:-blog}",
+                 pool_size => ${DATABASE_POOL_SIZE:-10}
+             }}}
+         ]},
+         {rebar3_nova, [{nova_apps, [{rebar3_nova_audit_sub, #{prefix => "/sub"}}]}]},
+         {rebar3_nova_audit_sub, [{router_module, rebar3_nova_test_router}]}
+        ].
+        """
+    ),
+    Parsed = rebar3_nova_audit:consult_config(Path, true),
+    ?assertMatch(
+        [{kura, [{ssl, true}, {repos, #{blog_repo := #{port := 5432, database := "blog"}}}]} | _],
+        Parsed
+    ),
+    with_prod_only_route(fun() ->
+        try
+            #{warnings := Warnings} = rebar3_nova_audit:audit(rebar3_nova, prod, Parsed),
+            ?assertEqual(1, length(mentioning("/sub/admin", Warnings)))
+        after
+            application:unset_env(rebar3_nova_audit_sub, router_module)
+        end
+    end).
+
+audit_names_the_config_and_warns_without_one(_Config) ->
+    Base = #{env => prod, strict => false, config => [], config_file => "config/dev_sys.config"},
+    Shell = printed(fun() -> rebar3_nova_audit:run(rebar3_nova, Base#{explicit_config => false}) end),
+    ?assertNotEqual(nomatch, string:find(Shell, "nova_apps read from config/dev_sys.config.")),
+    ?assertNotEqual(nomatch, string:find(Shell, "pass --config")),
+    Given = printed(fun() ->
+        rebar3_nova_audit:run(rebar3_nova, Base#{
+            config_file => "config/prod_sys.config.src", explicit_config => true
+        })
+    end),
+    ?assertNotEqual(nomatch, string:find(Given, "nova_apps read from config/prod_sys.config.src.")),
+    ?assertEqual(nomatch, string:find(Given, "pass --config")),
+    Dev = printed(fun() ->
+        rebar3_nova_audit:run(rebar3_nova, Base#{env => dev, explicit_config => false})
+    end),
+    ?assertEqual(nomatch, string:find(Dev, "pass --config")).
+
+audit_restores_the_environment(_Config) ->
+    Config = [{rebar3_nova_audit_sub, [{router_module, rebar3_nova_test_router}]}],
+    application:unset_env(nova, environment),
+    application:unset_env(rebar3_nova_audit_sub, router_module),
+    _ = rebar3_nova_audit:audit(rebar3_nova, prod, Config),
+    ?assertEqual(undefined, application:get_env(nova, environment)),
+    ?assertEqual(undefined, application:get_env(rebar3_nova_audit_sub, router_module)),
+    application:set_env(nova, environment, test),
+    application:set_env(rebar3_nova_audit_sub, router_module, other_router),
+    try
+        _ = rebar3_nova_audit:audit(rebar3_nova, prod, Config),
+        ?assertEqual({ok, test}, application:get_env(nova, environment)),
+        ?assertEqual({ok, other_router}, application:get_env(rebar3_nova_audit_sub, router_module))
+    after
+        application:unset_env(nova, environment),
+        application:unset_env(rebar3_nova_audit_sub, router_module)
+    end.
+
+printed(Fun) ->
+    ct:capture_start(),
+    try
+        ok = Fun()
+    after
+        ct:capture_stop()
+    end,
+    lists:flatten(ct:capture_get()).
 
 with_prod_only_route(Fun) ->
     rebar3_nova_test_router:set_routes(fun

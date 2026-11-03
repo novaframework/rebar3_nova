@@ -3,7 +3,7 @@
 -export([init/1, do/1, format_error/1]).
 
 %% Exported for rebar3_nova_dispatch_SUITE and rebar3_nova_commands_SUITE.
--export([collect_routes/1, classify_findings/1, audit/3, run/2, nova_apps/2]).
+-export([collect_routes/1, classify_findings/1, audit/3, run/2, nova_apps/2, consult_config/2]).
 
 -include("nova_router.hrl").
 
@@ -23,7 +23,7 @@ init(State) ->
             {env, $e, "env", {atom, dev},
                 "Nova environment the routes are compiled for, as routes/1 sees it"},
             {config, $c, "config", string,
-                "sys.config to read nova_apps from (default: the shell config)"},
+                "sys.config or .config.src to read nova_apps from (default: the shell config)"},
             {strict, $s, "strict", {boolean, false}, "Fail when there are warnings"}
         ]},
         {short_desc, "Audit route security configuration"},
@@ -37,15 +37,23 @@ init(State) ->
 do(State) ->
     App = rebar3_nova_utils:get_app_name(State),
     {Args, _} = rebar_state:command_parsed_args(State),
-    Config =
+    {ConfigFile, Explicit} =
         case proplists:get_value(config, Args) of
-            undefined -> rebar3_nova_utils:load_sys_config(State);
-            Path -> consult_config(lists:flatten(io_lib:format("~ts", [Path])))
+            undefined -> {rebar3_nova_utils:sys_config_path(State), false};
+            Path -> {lists:flatten(io_lib:format("~ts", [Path])), true}
         end,
+    Config = consult_config(ConfigFile, Explicit),
     rebar_paths:set_paths([deps, plugins], State),
     case {proplists:get_value(env, Args, dev), proplists:get_value(strict, Args, false)} of
         {Env, Strict} when is_atom(Env), is_boolean(Strict) ->
-            case run(App, #{env => Env, strict => Strict, config => Config}) of
+            Options = #{
+                env => Env,
+                strict => Strict,
+                config => Config,
+                config_file => ConfigFile,
+                explicit_config => Explicit
+            },
+            case run(App, Options) of
                 ok -> {ok, State};
                 {error, Message} -> {error, Message}
             end
@@ -53,12 +61,31 @@ do(State) ->
 
 -doc """
 Audit and print the report. With `strict => true`, warnings are an error.
+`config_file` names where `config` was read from, and `explicit_config`
+says whether it was asked for with `--config`.
 """.
--spec run(atom(), #{env := atom(), strict := boolean(), config := [{atom(), term()}]}) ->
+-spec run(atom(), #{
+    env := atom(),
+    strict := boolean(),
+    config := [{atom(), term()}],
+    config_file => string(),
+    explicit_config => boolean()
+}) ->
     ok | {error, string()}.
-run(App, #{env := Env, strict := Strict, config := Config}) ->
+run(App, #{env := Env, strict := Strict, config := Config} = Options) ->
     #{warnings := Warnings, infos := Infos, coverage := Coverage} = audit(App, Env, Config),
-    io:format("~n=== Security Audit ===~n~n  ~ts~n", [Coverage]),
+    ConfigFile = maps:get(config_file, Options, "no config"),
+    io:format("~n=== Security Audit ===~n~n  ~ts nova_apps read from ~ts.~n", [Coverage, ConfigFile]),
+    case Env =/= dev andalso not maps:get(explicit_config, Options, false) of
+        true ->
+            io:format(
+                "~n  Note: --env ~p reads nova_apps from ~ts; pass --config with the ~p "
+                "config if its nova_apps differ.~n",
+                [Env, ConfigFile, Env]
+            );
+        false ->
+            ok
+    end,
     print_section("WARNINGS", Warnings),
     print_section("INFO", Infos),
     io:format("~n  Summary: ~b warning(s), ~b info(s)~n", [length(Warnings), length(Infos)]),
@@ -81,19 +108,21 @@ for the Nova environment `Env`, and classify them.
     #{warnings := [iodata()], infos := [iodata()], coverage := iodata()}.
 audit(App, Env, Config) ->
     Apps = nova_apps([App], Config),
-    _ = [
-        application:set_env(Name, router_module, Router)
-     || {Name, Env1} <- Config,
-        is_list(Env1),
-        {router_module, Router} <- Env1
-    ],
-    Previous = nova:get_environment(),
-    application:set_env(nova, environment, Env),
+    Settings =
+        [{nova, environment, Env}] ++
+            [
+                {Name, router_module, Router}
+             || {Name, AppEnv} <- Config,
+                is_list(AppEnv),
+                {router_module, Router} <- AppEnv
+            ],
+    Previous = [{Name, Key, application:get_env(Name, Key)} || {Name, Key, _} <- Settings],
+    _ = [application:set_env(Name, Key, Value) || {Name, Key, Value} <- Settings],
     Dispatch =
         try
             rebar3_nova_utils:compile_app_routes(Apps)
         after
-            application:set_env(nova, environment, Previous)
+            lists:foreach(fun restore_env/1, lists:reverse(Previous))
         end,
     ok = rebar3_nova_dispatch:warn_unknown(Dispatch),
     {Warnings, Infos} = classify_findings(collect_routes(Dispatch)),
@@ -102,6 +131,9 @@ audit(App, Env, Config) ->
         infos => Infos,
         coverage => coverage(Env, Apps, Dispatch, Config)
     }.
+
+restore_env({Name, Key, undefined}) -> application:unset_env(Name, Key);
+restore_env({Name, Key, {ok, Value}}) -> application:set_env(Name, Key, Value).
 
 coverage(Env, Apps, Dispatch, Config) ->
     Handlers = [
@@ -153,11 +185,72 @@ declared_nova_apps(Name, Config) ->
 app_name({App, _Options}) -> App;
 app_name(App) -> App.
 
--spec consult_config(string()) -> [{atom(), term()}].
-consult_config(Path) ->
-    case file:consult(Path) of
-        {ok, [Config]} when is_list(Config) -> [{App, Env} || {App, Env} <- Config, is_atom(App)];
-        {error, Reason} -> rebar_api:abort("Could not read ~s: ~p", [Path, Reason])
+-doc """
+The application envs in the sys.config at `Path`. `${VAR}` and
+`${VAR:-Default}` are replaced first, from the environment or the default,
+as relx does for a `.config.src`. A missing file is an error when it was
+asked for and an empty config otherwise.
+""".
+-spec consult_config(file:filename_all(), boolean()) -> [{atom(), term()}].
+consult_config(Path, Explicit) ->
+    case file:read_file(Path) of
+        {ok, Content} ->
+            case parse_config(substitute_env(Content)) of
+                {ok, Config} when is_list(Config) ->
+                    [{App, Env} || {App, Env} <- Config, is_atom(App)];
+                _ ->
+                    rebar_api:abort("Could not parse ~ts as a sys.config", [Path])
+            end;
+        {error, Reason} when Explicit ->
+            rebar_api:abort("Could not read ~ts: ~p", [Path, Reason]);
+        {error, _} ->
+            rebar_api:warn("Could not read config from ~ts", [Path]),
+            []
+    end.
+
+substitute_env(Content) ->
+    case binary:split(Content, ~"${") of
+        [Before, Rest] ->
+            case binary:split(Rest, ~"}") of
+                [Variable, After] ->
+                    <<Before/binary, (env_value(Variable))/binary, (substitute_env(After))/binary>>;
+                [_] ->
+                    Content
+            end;
+        [_] ->
+            Content
+    end.
+
+env_value(Variable) ->
+    {Name, Default} =
+        case binary:split(Variable, ~":-") of
+            [Name0, Default0] -> {Name0, Default0};
+            [Name0] -> {Name0, <<>>}
+        end,
+    case os:getenv(binary_to_list(Name)) of
+        false ->
+            Default;
+        Value ->
+            case unicode:characters_to_binary(Value) of
+                Binary when is_binary(Binary) -> Binary
+            end
+    end.
+
+parse_config(Content) ->
+    case unicode:characters_to_list(Content) of
+        Text when is_list(Text) -> parse_term(Text);
+        _ -> error
+    end.
+
+parse_term(Text) ->
+    case erl_scan:string(Text) of
+        {ok, Tokens, _} ->
+            case erl_parse:parse_term(Tokens) of
+                {ok, Term} -> {ok, Term};
+                {error, _} -> error
+            end;
+        _ ->
+            error
     end.
 
 -spec format_error(any()) -> iolist().
