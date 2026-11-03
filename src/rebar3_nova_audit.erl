@@ -28,7 +28,7 @@ init(State) ->
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
     AppName = rebar3_nova_utils:get_app_name(State),
-    Dispatch = nova_router:compile([AppName]),
+    Dispatch = rebar3_nova_utils:compile_routes(State, AppName),
     Routes = collect_routes(Dispatch),
 
     {Warnings, Infos} = classify_findings(Routes),

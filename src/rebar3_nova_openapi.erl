@@ -51,7 +51,7 @@ do(State) ->
         end,
     ApiVersion = proplists:get_value(api_version, Args, "0.1.0"),
 
-    Dispatch = nova_router:compile([AppName]),
+    Dispatch = rebar3_nova_utils:compile_routes(State, AppName),
     Routes = collect_routes(Dispatch),
 
     Schemas = load_schemas(AppDir),

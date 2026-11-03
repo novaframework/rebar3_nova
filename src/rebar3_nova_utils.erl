@@ -8,7 +8,9 @@
     write_file_if_not_exists/2,
     copy_priv_file/2,
     parse_actions/1,
-    load_sys_config/1
+    load_sys_config/1,
+    compile_routes/2,
+    router_module/1
 ]).
 
 -spec get_app_name(rebar_state:t()) -> atom().
@@ -70,6 +72,35 @@ load_sys_config(State) ->
         {error, _} ->
             rebar_api:warn("Could not read config from ~s", [ConfigPath]),
             []
+    end.
+
+-doc """
+Compile `App`'s routes with the project's own Nova rather than the copy
+bundled with this plugin, so the dispatch table matches what the
+application serves. Needs nova 0.18 or later in the project.
+""".
+-spec compile_routes(rebar_state:t(), atom()) -> nova_routing_trie:trie().
+compile_routes(State, App) ->
+    rebar_paths:set_paths([deps, plugins], State),
+    _ = application:load(App),
+    _ = code:ensure_loaded(nova_routing_trie),
+    case erlang:function_exported(nova_routing_trie, routes, 1) of
+        true ->
+            nova_router:compile([App]);
+        false ->
+            rebar_api:abort(
+                "rebar3_nova reads routes with nova_routing_trie, which needs nova 0.18 or "
+                "later. Upgrade the project's nova dependency.",
+                []
+            )
+    end.
+
+-doc "The router module Nova uses for `App`: its `router_module` env, or `App_router`.".
+-spec router_module(atom()) -> module().
+router_module(App) ->
+    case application:get_env(App, router_module) of
+        {ok, Router} when is_atom(Router) -> Router;
+        _ -> list_to_atom(atom_to_list(App) ++ "_router")
     end.
 
 %%----------------------------------------------------------------------

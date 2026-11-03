@@ -35,9 +35,8 @@ init(State) ->
 
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
-    [Hd | _] = rebar_state:project_apps(State),
-    App = erlang:binary_to_atom(rebar_app_info:name(Hd)),
-    Dispatch = nova_router:compile([App]),
+    App = rebar3_nova_utils:get_app_name(State),
+    Dispatch = rebar3_nova_utils:compile_routes(State, App),
     print_routes(Dispatch),
     {ok, State}.
 
