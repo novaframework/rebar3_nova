@@ -6,7 +6,11 @@
 -define(MAX_BYTES, 65536).
 
 %% Refuses a body over max_bytes (default 65536) before anything reads it.
-%% A chunked body has no length up front, so it is refused too.
+%% A body without content-length (HTTP/1.1 chunked or HTTP/2) has no length
+%% up front, so it is refused too. Nova 0.19's nova_request_plugin also caps
+%% the body it decodes (max_body_length, default 1 MB), but it reads a body
+%% without content-length up to that cap; this plugin refuses one unread,
+%% and keeps a lower limit for the routes it is on.
 pre_request(Req, _Env, Options, State) ->
     Max = maps:get(max_bytes, Options, ?MAX_BYTES),
     case cowboy_req:body_length(Req) of

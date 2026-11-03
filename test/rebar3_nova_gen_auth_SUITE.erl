@@ -39,7 +39,12 @@
     token_schema_has_the_refresh_fields_and_indexes/1,
     registration_needs_email_and_a_long_password/1,
     registration_normalises_the_email/1,
-    changesets_scrub_the_password/1
+    changesets_scrub_the_password/1,
+    routes_state_their_plugin_strategy/1,
+    deps_list_seki_for_the_login_limit/1,
+    sessions_are_turned_off_only_without_session_pages/1,
+    body_limit_names_bodies_without_content_length/1,
+    protected_group_example_uses_neutral_names/1
 ]).
 -export([log/2]).
 
@@ -84,7 +89,12 @@ groups() ->
             token_schema_has_the_refresh_fields_and_indexes,
             registration_needs_email_and_a_long_password,
             registration_normalises_the_email,
-            changesets_scrub_the_password
+            changesets_scrub_the_password,
+            routes_state_their_plugin_strategy,
+            deps_list_seki_for_the_login_limit,
+            sessions_are_turned_off_only_without_session_pages,
+            body_limit_names_bodies_without_content_length,
+            protected_group_example_uses_neutral_names
         ]}
     ].
 
@@ -360,7 +370,7 @@ rate_limit_runs_before_the_body_is_decoded(_Config) ->
     ?assert(Limiter > 0),
     ?assert(Limiter < BodyLimit),
     ?assert(BodyLimit < Decoder),
-    ?assertEqual(1, length(string:split(Text, "nova_request_plugin", all)) - 1),
+    ?assertEqual(1, length(string:split(Text, "{pre_request, nova_request_plugin", all)) - 1),
     ?assertNotEqual(nomatch, string:find(Text, "plugins => [],")).
 
 instructions_cover_sessions_enumeration_and_proxies(_Config) ->
@@ -368,7 +378,7 @@ instructions_cover_sessions_enumeration_and_proxies(_Config) ->
     [
         ?assertNotEqual(nomatch, string:find(Text, Needle), Needle)
      || Needle <- [
-            "{blog, [{use_sessions, false}]}",
+            "Only if the app has no session or cookie-based pages",
             "tells anyone which emails have accounts",
             "{nova_auth, [{trusted_proxies, [",
             "20 attempts per email"
@@ -423,9 +433,63 @@ changesets_scrub_the_password(_Config) ->
     ?assertEqual(~"hashed:a new passphrase", kura_changeset:get_change(Change, hashed_password)),
     assert_no_plaintext(Change).
 
+%% Under global_first or local_first, global plugins are merged into these
+%% groups and a global body decoder runs before the limits.
+routes_state_their_plugin_strategy(_Config) ->
+    Text = rebar3_nova_gen_auth:instructions(?APP),
+    [
+        ?assertNotEqual(nomatch, string:find(step(Text, N), "local_or_global"), N)
+     || N <- [4, 5]
+    ],
+    ?assertNotEqual(nomatch, string:find(step(Text, 4), "global_first or local_first")).
+
+%% blog_login_limit calls seki itself.
+deps_list_seki_for_the_login_limit(_Config) ->
+    ?assertNotEqual(
+        nomatch, string:find(step(rebar3_nova_gen_auth:instructions(?APP), 1), "{seki, \"~> 0.4\"}")
+    ),
+    ?assertNotEqual(nomatch, binary:match(render_auth("login_limit.erl.src"), ~"seki:check")).
+
+%% Turning sessions off for the whole app breaks session pages next to the API.
+sessions_are_turned_off_only_without_session_pages(_Config) ->
+    Step = step(rebar3_nova_gen_auth:instructions(?APP), 3),
+    ?assertNotEqual(
+        nomatch, string:find(Step, "Only if the app has no session or cookie-based pages")
+    ),
+    ?assertNotEqual(nomatch, string:find(Step, "{blog, [{use_sessions, false}]}")).
+
+body_limit_names_bodies_without_content_length(_Config) ->
+    Wording = "without content-length (HTTP/1.1 chunked or HTTP/2)",
+    ?assertNotEqual(
+        nomatch, string:find(step(rebar3_nova_gen_auth:instructions(?APP), 4), Wording)
+    ),
+    ?assertNotEqual(
+        nomatch, binary:match(render_auth("body_limit.erl.src"), list_to_binary(Wording))
+    ),
+    ?assertNotEqual(nomatch, binary:match(render_auth("body_limit.erl.src"), ~"max_body_length")).
+
+protected_group_example_uses_neutral_names(_Config) ->
+    Step = step(rebar3_nova_gen_auth:instructions(?APP), 5),
+    Group = eval_term(string:substr(Step, string:str(Step, "#{prefix"))),
+    ?assertMatch(
+        [{"/items", _, #{methods := [post]}}], maps:get(routes, Group)
+    ),
+    [{_, Create, _}] = maps:get(routes, Group),
+    ?assertEqual(fun blog_item_controller:create/1, Create),
+    ?assertEqual(nomatch, string:find(Step, "post_controller")).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
+
+%% Step N of the printed instructions, up to the next step.
+step(Text, N) ->
+    Start = string:str(Text, integer_to_list(N) ++ ". "),
+    Rest = string:substr(Text, Start),
+    case string:str(Rest, "\n\n" ++ integer_to_list(N + 1) ++ ". ") of
+        0 -> Rest;
+        End -> string:substr(Rest, 1, End)
+    end.
 
 auth_files() ->
     rebar3_nova_gen_auth:files(?APP).
