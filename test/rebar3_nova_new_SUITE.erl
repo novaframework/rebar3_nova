@@ -24,7 +24,8 @@
     current_toolchain/1,
     generated_erlang_compiles/1,
     templates_use_current_stack/1,
-    template_sys_configs_are_valid_terms/1
+    template_sys_configs_are_valid_terms/1,
+    vm_args_keep_the_cookie_out/1
 ]).
 
 all() ->
@@ -48,7 +49,8 @@ all() ->
         current_toolchain,
         generated_erlang_compiles,
         templates_use_current_stack,
-        template_sys_configs_are_valid_terms
+        template_sys_configs_are_valid_terms,
+        vm_args_keep_the_cookie_out
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -476,6 +478,23 @@ template_sys_configs_are_valid_terms(_Config) ->
         prop(routes, prop(arizona_nova, Terms))
     ).
 
+%% A cookie written into vm.args is the same for every project of that name,
+%% so anyone who can reach the distribution port can run code on the node.
+vm_args_keep_the_cookie_out(_Config) ->
+    Name = "testapp_vmargs",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    Generated = read_file(Name, "config/vm.args.src"),
+    assert_contains(Generated, "-sname testapp_vmargs@localhost"),
+    [assert_vm_args(V) || V <- [Generated, read_file(templates_dir(), "nova/vm.args.src")]],
+    assert_contains(
+        read_file(templates_dir(), "nova_lfe.template"),
+        "{template, \"nova/vm.args.src\", \"{{name}}/config/vm.args.src\"}"
+    ),
+    assert_contains(
+        read_file(templates_dir(), "nova_lfe/rebar.config"),
+        "{vm_args_src, \"./config/vm.args.src\"}"
+    ).
+
 template_sys_configs() ->
     [
         "nova/dev_sys.config.src",
@@ -546,6 +565,12 @@ read_file(Base, RelPath) ->
     Path = filename:join(Base, RelPath),
     {ok, Bin} = file:read_file(Path),
     binary_to_list(Bin).
+
+assert_vm_args(VmArgs) ->
+    Lines = [L || L <- string:split(VmArgs, "\n", all), string:trim(L) =/= ""],
+    ?assertEqual(["-setcookie ${RELEASE_COOKIE}"], [L || "-setcookie" ++ _ = L <- Lines]),
+    ?assertEqual("-setcookie ${RELEASE_COOKIE}", lists:last(Lines)),
+    ?assert(lists:member("-kernel inet_dist_use_interface {127,0,0,1}", Lines)).
 
 assert_contains(Content, Substr) ->
     case string:find(Content, Substr) of

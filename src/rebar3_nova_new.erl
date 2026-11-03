@@ -875,16 +875,12 @@ sys_config_otel(_Env, _Flags) ->
 
 generate_vm_args(Name) ->
     Path = filename:join([Name, "config", "vm.args.src"]),
-    Content = [
-        "-sname '",
-        Name,
-        "'\n\n",
-        "-setcookie ",
-        Name,
-        "_cookie\n\n",
-        "+K true\n",
-        "+A30\n"
-    ],
+    PrivDir =
+        case code:priv_dir(rebar3_nova) of
+            Dir when is_list(Dir) -> Dir
+        end,
+    {ok, Source} = file:read_file(filename:join([PrivDir, "templates", "nova", "vm.args.src"])),
+    Content = binary:replace(Source, ~"{{name}}", unicode:characters_to_binary(Name), [global]),
     rebar3_nova_utils:write_file(Path, Content).
 
 %%======================================================================
