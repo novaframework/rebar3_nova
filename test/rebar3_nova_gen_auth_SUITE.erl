@@ -30,6 +30,9 @@
     emails_over_254_bytes_are_not_counted/1,
     token_response_is_not_cached/1,
     registration_hides_database_errors/1,
+    login_hides_token_errors/1,
+    one_address_cannot_lock_an_account/1,
+    retry_after_rounds_up/1,
     body_limit_reply_has_no_connection_header/1,
     bearer_token_allows_only_trailing_padding/1,
     files_are_valid_formatted_erlang/1,
@@ -37,29 +40,23 @@
     drops_the_nova_auth_0_2_workarounds/1,
     writes_no_migration/1,
     names_follow_the_app/1,
-    instructions_target_nova_auth_0_3/1,
-    instructions_run_migrations_as_a_release_step/1,
     rate_limit_runs_before_the_body_is_decoded/1,
-    instructions_cover_sessions_enumeration_and_proxies/1,
     protected_group_example_limits_the_body/1,
     suite_builds_binaries_with_sigils/1,
     token_schema_has_the_refresh_fields_and_indexes/1,
     registration_needs_email_and_a_long_password/1,
     registration_normalises_the_email/1,
     registration_caps_the_email_at_254_bytes/1,
+    registration_needs_one_at_sign/1,
+    generated_exports_have_specs/1,
+    instructions_name_what_the_app_must_add/1,
     changesets_scrub_the_password/1,
-    routes_state_their_plugin_strategy/1,
-    deps_list_seki_for_the_login_limit/1,
-    sessions_are_turned_off_only_without_session_pages/1,
-    body_limit_names_bodies_without_content_length/1,
     protected_group_example_uses_neutral_names/1,
-    instructions_name_the_lockout_cpu_and_bypass_limits/1,
     suite_covers_the_limits_and_unauthenticated_requests/1
 ]).
 -export([log/2]).
 
 -define(APP, "blog").
--define(PORT, 58632).
 -define(MB, 1048576).
 
 all() ->
@@ -88,6 +85,9 @@ groups() ->
             emails_over_254_bytes_are_not_counted,
             token_response_is_not_cached,
             registration_hides_database_errors,
+            login_hides_token_errors,
+            one_address_cannot_lock_an_account,
+            retry_after_rounds_up,
             body_limit_reply_has_no_connection_header,
             bearer_token_allows_only_trailing_padding
         ]},
@@ -97,23 +97,18 @@ groups() ->
             drops_the_nova_auth_0_2_workarounds,
             writes_no_migration,
             names_follow_the_app,
-            instructions_target_nova_auth_0_3,
-            instructions_run_migrations_as_a_release_step,
             rate_limit_runs_before_the_body_is_decoded,
-            instructions_cover_sessions_enumeration_and_proxies,
             protected_group_example_limits_the_body,
             suite_builds_binaries_with_sigils,
             token_schema_has_the_refresh_fields_and_indexes,
             registration_needs_email_and_a_long_password,
             registration_normalises_the_email,
             registration_caps_the_email_at_254_bytes,
+            registration_needs_one_at_sign,
+            generated_exports_have_specs,
+            instructions_name_what_the_app_must_add,
             changesets_scrub_the_password,
-            routes_state_their_plugin_strategy,
-            deps_list_seki_for_the_login_limit,
-            sessions_are_turned_off_only_without_session_pages,
-            body_limit_names_bodies_without_content_length,
             protected_group_example_uses_neutral_names,
-            instructions_name_the_lockout_cpu_and_bypass_limits,
             suite_covers_the_limits_and_unauthenticated_requests
         ]}
     ].
@@ -146,7 +141,7 @@ init_per_group(served, Config) ->
     application:set_env(nova, bootstrap_application, blog),
     application:set_env(nova, environment, dev),
     application:set_env(nova, dispatch_backend, persistent_term),
-    application:set_env(nova, cowboy_configuration, #{port => ?PORT}),
+    application:set_env(nova, cowboy_configuration, #{port => 0}),
     application:set_env(nova, plugins, [
         {pre_request, nova_request_plugin, #{decode_json_body => true}}
     ]),
@@ -372,6 +367,30 @@ registration_hides_database_errors(_Config) ->
         blog_auth_controller:register(#{json => #{~"email" => ~"taken@example.org"}})
     ).
 
+login_hides_token_errors(_Config) ->
+    Json = #{~"email" => ~"tokenless@example.org", ~"password" => ~"the right password"},
+    ?assertEqual(
+        {json, 503, #{}, #{~"error" => ~"try again later"}},
+        blog_auth_controller:login((req({192, 0, 2, 6}, ~""))#{json => Json})
+    ).
+
+%% Past its own 5 attempts an address spends none of the email's 50, so it
+%% cannot lock the account by itself.
+one_address_cannot_lock_an_account(_Config) ->
+    Email = ~"one-address@example.org",
+    Checks = [blog_login_limit:check(Email, req({192, 0, 2, 7}, ~"")) || _ <- lists:seq(1, 50)],
+    ?assertEqual(lists:duplicate(5, allow), lists:sublist(Checks, 5)),
+    ?assertEqual([], [Check || Check <- lists:nthtail(5, Checks), Check =:= allow]),
+    ?assertEqual(allow, blog_login_limit:check(Email, req({192, 0, 2, 8}, ~""))).
+
+%% seki answers 60001 ms here. Rounded down that would be 60 s, a second
+%% too soon; rounded up as nova_auth_rate_limit does, it is 61.
+retry_after_rounds_up(_Config) ->
+    Req = req({192, 0, 2, 9}, ~""),
+    Email = ~"retry@example.org",
+    [allow = blog_login_limit:check(Email, Req) || _ <- lists:seq(1, 5)],
+    ?assertEqual({deny, 61}, blog_login_limit:check(Email, Req)).
+
 body_limit_reply_has_no_connection_header(_Config) ->
     Req = #{pid => self(), streamid => 1, method => ~"POST", body_length => ?MB},
     {stop, _, state} = blog_body_limit:pre_request(Req, #{}, #{}, state),
@@ -412,7 +431,10 @@ uses_nova_auth_not_bcrypt_or_thoas(_Config) ->
 drops_the_nova_auth_0_2_workarounds(_Config) ->
     Paths = [P || {_, P} <- auth_files()],
     ?assertEqual([], [P || P <- Paths, string:find(P, "rate_limit") =/= nomatch]),
-    Sources = iolist_to_binary([rebar3_nova_gen_auth:render(T, ?APP) || {T, _} <- auth_files()]),
+    Sources = iolist_to_binary([
+        rebar3_nova_gen_auth:render(T, ?APP)
+     || {T, P} <- auth_files(), string:find(P, "_SUITE") =:= nomatch
+    ]),
     ?assertEqual(
         nomatch, binary:match(Sources, [~"key_fun", ~"x-forwarded-for", ~"blog_rate_limit"])
     ),
@@ -434,18 +456,6 @@ names_follow_the_app(_Config) ->
      || {T, _} <- auth_files()
     ].
 
-instructions_target_nova_auth_0_3(_Config) ->
-    Text = rebar3_nova_gen_auth:instructions(?APP),
-    ?assertNotEqual(nomatch, string:find(Text, "{nova_auth, \"~> 0.3\"}")),
-    ?assertEqual(nomatch, string:find(Text, "~> 0.2")).
-
-instructions_run_migrations_as_a_release_step(_Config) ->
-    Text = rebar3_nova_gen_auth:instructions(?APP),
-    ?assertNotEqual(
-        nomatch, string:find(Text, "kura_migrator:migrate(blog_repo) as a release step")
-    ),
-    ?assertNotEqual(nomatch, string:find(Text, "not in blog_app:start/2")).
-
 rate_limit_runs_before_the_body_is_decoded(_Config) ->
     Instructions = rebar3_nova_gen_auth:instructions(?APP),
     Start = string:str(Instructions, "4. Add the routes"),
@@ -461,22 +471,9 @@ rate_limit_runs_before_the_body_is_decoded(_Config) ->
     ?assertEqual(1, length(string:split(Text, "{pre_request, nova_request_plugin", all)) - 1),
     ?assertNotEqual(nomatch, string:find(Text, "plugins => [],")).
 
-instructions_cover_sessions_enumeration_and_proxies(_Config) ->
-    Text = rebar3_nova_gen_auth:instructions(?APP),
-    [
-        ?assertNotEqual(nomatch, string:find(Text, Needle), Needle)
-     || Needle <- [
-            "Only if the app has no session or cookie-based pages",
-            "tells anyone which emails have accounts",
-            "{nova_auth, [{trusted_proxies, [",
-            "5 attempts per email and client address and 50 per email from all addresses"
-        ]
-    ].
-
 protected_group_example_limits_the_body(_Config) ->
     Text = rebar3_nova_gen_auth:instructions(?APP),
-    Start = string:str(Text, "5. Protect"),
-    Step = string:substr(Text, Start, string:str(Text, "\n\n6.") - Start),
+    Step = step(Text, 5),
     Group = eval_term(string:substr(Step, string:str(Step, "#{prefix"))),
     ?assertEqual(fun blog_auth_security:require_bearer/1, maps:get(security, Group)),
     ?assertEqual(
@@ -521,6 +518,46 @@ registration_caps_the_email_at_254_bytes(_Config) ->
     Wide = registration(<<(binary:copy(~"ö", 122))/binary, "@example.org">>, ~"twelve chars"),
     ?assertMatch([{email, _}], Wide#kura_changeset.errors).
 
+registration_needs_one_at_sign(_Config) ->
+    [
+        ?assertMatch(
+            [{email, _}], (registration(Email, ~"twelve chars"))#kura_changeset.errors, Email
+        )
+     || Email <- [
+            ~"reader.example.org",
+            ~"reader@@example.org",
+            ~"a@b@example.org",
+            ~"@example.org",
+            ~"reader@"
+        ]
+    ],
+    ?assert((registration(~"a@b", ~"twelve chars"))#kura_changeset.valid).
+
+%% Every exported function of the generated modules has a -spec.
+generated_exports_have_specs(Config) ->
+    Unspecced = [
+        {Template, unspecced(Config, Template)}
+     || {Template, Path} <- auth_files(), string:find(Path, "_SUITE") =:= nomatch
+    ],
+    ?assertEqual([], [U || {_, [_ | _]} = U <- Unspecced]).
+
+%% The prose lives in the README; these are what the printed steps must name.
+instructions_name_what_the_app_must_add(_Config) ->
+    Text = rebar3_nova_gen_auth:instructions(?APP),
+    [
+        ?assertNotEqual(nomatch, string:find(Text, Needle), Needle)
+     || Needle <- [
+            "{nova_auth, \"~> 0.3\"}",
+            "{seki, \"~> 0.4\"}",
+            "kura_migrator:migrate(blog_repo) as a release step, not in blog_app:start/2",
+            "Only if the app has no session or cookie-based pages",
+            "{blog, [{use_sessions, false}]}",
+            "{nova_auth, [{trusted_proxies, [",
+            "See README: gen_auth caveats."
+        ]
+    ],
+    ?assertEqual(nomatch, string:find(Text, "~> 0.2")).
+
 %% A changeset comes back in {error, CS} and can reach a log or crash report.
 changesets_scrub_the_password(_Config) ->
     assert_no_plaintext(registration(~"reader@example.org", ~"twelve chars")),
@@ -529,41 +566,6 @@ changesets_scrub_the_password(_Config) ->
     ?assert(Change#kura_changeset.valid),
     ?assertEqual(~"hashed:a new passphrase", kura_changeset:get_change(Change, hashed_password)),
     assert_no_plaintext(Change).
-
-%% Under global_first or local_first, global plugins are merged into these
-%% groups and a global body decoder runs before the limits.
-routes_state_their_plugin_strategy(_Config) ->
-    Text = rebar3_nova_gen_auth:instructions(?APP),
-    [
-        ?assertNotEqual(nomatch, string:find(step(Text, N), "local_or_global"), N)
-     || N <- [4, 5]
-    ],
-    ?assertNotEqual(nomatch, string:find(step(Text, 4), "global_first or local_first")).
-
-%% blog_login_limit calls seki itself.
-deps_list_seki_for_the_login_limit(_Config) ->
-    ?assertNotEqual(
-        nomatch, string:find(step(rebar3_nova_gen_auth:instructions(?APP), 1), "{seki, \"~> 0.4\"}")
-    ),
-    ?assertNotEqual(nomatch, binary:match(render_auth("login_limit.erl.src"), ~"seki:check")).
-
-%% Turning sessions off for the whole app breaks session pages next to the API.
-sessions_are_turned_off_only_without_session_pages(_Config) ->
-    Step = step(rebar3_nova_gen_auth:instructions(?APP), 3),
-    ?assertNotEqual(
-        nomatch, string:find(Step, "Only if the app has no session or cookie-based pages")
-    ),
-    ?assertNotEqual(nomatch, string:find(Step, "{blog, [{use_sessions, false}]}")).
-
-body_limit_names_bodies_without_content_length(_Config) ->
-    Wording = "without content-length (HTTP/1.1 chunked or HTTP/2)",
-    ?assertNotEqual(
-        nomatch, string:find(step(rebar3_nova_gen_auth:instructions(?APP), 4), Wording)
-    ),
-    ?assertNotEqual(
-        nomatch, binary:match(render_auth("body_limit.erl.src"), list_to_binary(Wording))
-    ),
-    ?assertNotEqual(nomatch, binary:match(render_auth("body_limit.erl.src"), ~"max_body_length")).
 
 protected_group_example_uses_neutral_names(_Config) ->
     Step = step(rebar3_nova_gen_auth:instructions(?APP), 5),
@@ -575,23 +577,11 @@ protected_group_example_uses_neutral_names(_Config) ->
     ?assertEqual(fun blog_item_controller:create/1, Create),
     ?assertEqual(nomatch, string:find(Step, "post_controller")).
 
-instructions_name_the_lockout_cpu_and_bypass_limits(_Config) ->
-    Text = rebar3_nova_gen_auth:instructions(?APP),
-    [
-        ?assertNotEqual(nomatch, string:find(Text, Needle), Needle)
-     || Needle <- [
-            "lock its owner out until the window passes",
-            "hashes a password with PBKDF2, which costs real CPU",
-            "Under global_only or {override, _} the groups' plugin lists are dropped entirely",
-            "puts every client in one bucket, and trusted_proxies cannot fix that",
-            "each test sends from its own loopback address, 127.0.N.1"
-        ]
-    ].
-
-%% The generated suite runs against a database, so the cases are checked
+%% The generated suite runs against a database, so its cases are checked
 %% here and run in an app that has one.
 suite_covers_the_limits_and_unauthenticated_requests(Config) ->
-    Suite = compile_source(Config, "blog_auth_SUITE", render_auth("auth_SUITE.erl.src")),
+    Source = render_auth("auth_SUITE.erl.src"),
+    Suite = compile_source(Config, "blog_auth_SUITE", Source),
     Cases = Suite:all(),
     [
         ?assert(lists:member(Case, Cases), Case)
@@ -604,20 +594,26 @@ suite_covers_the_limits_and_unauthenticated_requests(Config) ->
             bearer_routes_do_not_read_an_unauthenticated_body
         ]
     ],
-    Sources = [proplists:get_value(source, Suite:init_per_testcase(Case, [])) || Case <- Cases],
-    ?assertEqual(length(Cases), length(lists:usort(Sources))),
-    [?assertMatch({127, 0, N, 1} when N > 0, Source) || Source <- Sources].
+    ?assertNotEqual(nomatch, binary:match(Source, ~"{ok, _} = kura_migrator:migrate(blog_repo)")),
+    %% Each test is a fresh client in its own /64, the unit the limits count.
+    Clients = [
+        proplists:get_value(client, Suite:init_per_testcase(register_login_and_logout, []))
+     || _ <- lists:seq(1, 20)
+    ],
+    [?assertMatch("2001:db8:" ++ _, Client) || Client <- Clients],
+    ?assertEqual(20, length(lists:usort(Clients))).
 
 %%====================================================================
 %% Helpers
 %%====================================================================
 
-%% Step N of the printed instructions, up to the next step.
+%% Step N of the printed instructions, up to the next step or the
+%% closing pointer to the README.
 step(Text, N) ->
     Start = string:str(Text, integer_to_list(N) ++ ". "),
     Rest = string:substr(Text, Start),
     case string:str(Rest, "\n\n" ++ integer_to_list(N + 1) ++ ". ") of
-        0 -> Rest;
+        0 -> string:substr(Rest, 1, string:str(Rest, "\n\nSee"));
         End -> string:substr(Rest, 1, End)
     end.
 
@@ -692,6 +688,18 @@ limiter_table(Name) ->
     {_Algorithm, seki_backend_ets, Tab, _Config} = seki_limiter_registry:lookup(Name),
     Tab.
 
+unspecced(Config, Template) ->
+    File = ?config(priv_dir, Config) ++ "/specs_" ++ Template,
+    ok = file:write_file(File, render_auth(Template)),
+    {ok, Forms} = epp:parse_file(File, []),
+    Exports = [F || {attribute, _, export, Functions} <- Forms, is_list(Functions), F <- Functions],
+    Exports -- [Function || {attribute, _, spec, {Function, _}} <- Forms].
+
+%% The port Nova bound for the served group, which asks for any free one.
+port() ->
+    [Port] = [Port || _ := #{port := Port} <- ranch:info()],
+    Port.
+
 accounts_stub() ->
     ~"""
     -module(blog_accounts).
@@ -700,10 +708,13 @@ accounts_stub() ->
 
     authenticate(~"reader@example.org", ~"the right password") ->
         {ok, #{id => 2, email => ~"reader@example.org"}};
+    authenticate(~"tokenless@example.org", ~"the right password") ->
+        {ok, #{id => 3, email => ~"tokenless@example.org"}};
     authenticate(_Email, _Password) ->
         {error, invalid_credentials}.
 
-    issue_token(#{id := 2}) -> {ok, ~"issued-token"}.
+    issue_token(#{id := 2}) -> {ok, ~"issued-token"};
+    issue_token(#{id := 3}) -> {error, connection_closed}.
 
     user_for_token(~"valid-token") ->
         {ok, #{
@@ -761,7 +772,7 @@ request(Source, Method, Path, Headers, Body) ->
 %% Sends a request from Source and returns the response status. The server
 %% may answer and close before the whole body is sent.
 raw(Source, Request) ->
-    {ok, Socket} = gen_tcp:connect({127, 0, 0, 1}, ?PORT, [binary, {active, false}, {ip, Source}]),
+    {ok, Socket} = gen_tcp:connect({127, 0, 0, 1}, port(), [binary, {active, false}, {ip, Source}]),
     _ = gen_tcp:send(Socket, Request),
     {ok, Response} = gen_tcp:recv(Socket, 0, 10000),
     ok = gen_tcp:close(Socket),

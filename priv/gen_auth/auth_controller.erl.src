@@ -4,6 +4,7 @@
 
 -export([register/1, login/1, logout/1, me/1]).
 
+-spec register(map()) -> {json, 201 | 400 | 422 | 503, map(), map()}.
 register(#{json := Params}) when is_map(Params) ->
     case {{app}}_accounts:register(Params) of
         {ok, User} ->
@@ -16,6 +17,7 @@ register(_Req) ->
 
 %% A malformed body is refused before any limit is consulted, so it spends
 %% no attempts from anyone's budget.
+-spec login(map()) -> {json, 201 | 400 | 401 | 403 | 429 | 503, map(), map()}.
 login(#{json := #{~"email" := Email, ~"password" := Password}} = Req) when
     is_binary(Email), is_binary(Password)
 ->
@@ -32,24 +34,34 @@ login(_Req) ->
 authenticate(Email, Password) ->
     case {{app}}_accounts:authenticate(Email, Password) of
         {ok, User} ->
-            {ok, Token} = {{app}}_accounts:issue_token(User),
-            ValidFor = nova_auth:config({{app}}_auth, session_validity_days) * 86400,
-            %% RFC 6749 section 5.1: a token response must not be cached.
-            Headers = #{~"cache-control" => ~"no-store", ~"pragma" => ~"no-cache"},
-            {json, 201, Headers, #{
-                ~"token" => Token, ~"token_type" => ~"Bearer", ~"expires_in" => ValidFor
-            }};
+            case {{app}}_accounts:issue_token(User) of
+                {ok, Token} ->
+                    token_response(Token);
+                {error, Reason} ->
+                    ?LOG_ERROR(#{msg => ~"token not issued", reason => Reason}),
+                    try_again_later()
+            end;
         {error, invalid_credentials} ->
             {json, 401, #{}, #{~"error" => ~"invalid email or password"}};
         {error, unconfirmed} ->
             {json, 403, #{}, #{~"error" => ~"confirm your email first"}}
     end.
 
+%% RFC 6749 section 5.1: a token response must not be cached.
+token_response(Token) ->
+    ValidFor = nova_auth:config({{app}}_auth, session_validity_days) * 86400,
+    Headers = #{~"cache-control" => ~"no-store", ~"pragma" => ~"no-cache"},
+    {json, 201, Headers, #{
+        ~"token" => Token, ~"token_type" => ~"Bearer", ~"expires_in" => ValidFor
+    }}.
+
+-spec logout(map()) -> {status, 204}.
 logout(Req) ->
     {ok, Token} = {{app}}_auth_security:bearer_token(Req),
     ok = {{app}}_accounts:revoke_token(Token),
     {status, 204}.
 
+-spec me(map()) -> {json, map()}.
 me(#{auth_data := User}) ->
     {json, user_json(User)}.
 
@@ -64,8 +76,11 @@ registration_error(Errors) ->
             {json, 422, #{}, #{~"errors" => errors_json(Errors)}};
         Base ->
             ?LOG_ERROR(#{msg => ~"registration failed", errors => Base}),
-            {json, 503, #{}, #{~"error" => ~"try again later"}}
+            try_again_later()
     end.
+
+try_again_later() ->
+    {json, 503, #{}, #{~"error" => ~"try again later"}}.
 
 errors_json(Errors) ->
     Fields = lists:usort([Field || {Field, _} <- Errors]),

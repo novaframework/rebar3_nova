@@ -10,24 +10,21 @@
 %% The rate-limit key for nova_auth_rate_limit: nova_auth's client_ip/1,
 %% which reads trusted_proxies from the nova_auth env, with IPv6 cut to
 %% its /64, since a single host usually holds a whole /64.
+-spec key(cowboy_req:req()) -> inet:ip_address().
 key(Req) ->
     case nova_auth_rate_limit:client_ip(Req) of
         {A, B, C, D, _, _, _, _} -> {A, B, C, D, 0, 0, 0, 0};
         IP -> IP
     end.
 
-%% Per-account limits on top of the per-address one, so rotating addresses
-%% does not buy unlimited guesses at one password: 5 attempts per account
-%% and client address, and 50 per account from all addresses, each per
-%% 5 minutes. The first limit that denies answers.
-%%
-%% The trade-off: anyone who knows an email can spend the account's 50
-%% attempts from 10 addresses (or IPv6 /64s), and then its owner cannot
-%% log in either until the window passes. The per-address tier keeps one
-%% address from doing it alone.
+%% 5 attempts per account and client address, then 50 per account from all
+%% addresses, each per 5 minutes; the first limit that denies answers, so
+%% one address cannot spend the account's 50. The lockout trade-off is in
+%% the README under gen_auth caveats.
 %%
 %% The limiters key on a SHA-256 of the normalised email, so the ETS
 %% tables hold no addresses and an entry has a fixed size.
+-spec check(term(), cowboy_req:req()) -> allow | {deny, pos_integer()}.
 check(Email, Req) ->
     case {{app}}_user:normalize_email(Email) of
         {ok, Normalized} when byte_size(Normalized) =< ?MAX_EMAIL_BYTES ->
@@ -52,7 +49,7 @@ first_deny([{Limiter, Key, Limit} | Rest]) ->
 check_limiter(Limiter, Key, Limit) ->
     try seki:check(Limiter, Key) of
         {allow, _} -> allow;
-        {deny, #{retry_after := RetryAfterMs}} -> {deny, max(1, RetryAfterMs div 1000)}
+        {deny, #{retry_after := RetryAfterMs}} -> {deny, max(1, (RetryAfterMs + 999) div 1000)}
     catch
         error:{limiter_not_found, Limiter} ->
             ok = new_limiter(Limiter, Limit),

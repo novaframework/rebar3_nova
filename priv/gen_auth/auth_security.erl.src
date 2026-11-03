@@ -3,6 +3,8 @@
 -export([require_bearer/1, bearer_token/1]).
 
 %% auth_data carries only what handlers need, never the password hash.
+-spec require_bearer(cowboy_req:req()) ->
+    {true, #{id := term(), email := binary()}} | {false, 401, map(), binary()}.
 require_bearer(Req) ->
     case bearer_token(Req) of
         {ok, Token} ->
@@ -15,6 +17,7 @@ require_bearer(Req) ->
     end.
 
 %% Bytewise, since the header is attacker-controlled and need not be UTF-8.
+-spec bearer_token(cowboy_req:req()) -> {ok, binary()} | error.
 bearer_token(Req) ->
     case cowboy_req:header(~"authorization", Req) of
         <<Scheme:6/binary, " ", Token/binary>> ->

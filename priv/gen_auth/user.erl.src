@@ -7,8 +7,10 @@
 
 -define(MIN_PASSWORD_LENGTH, 12).
 
+-spec table() -> binary().
 table() -> ~"users".
 
+-spec fields() -> [#kura_field{}].
 fields() ->
     [
         #kura_field{name = id, type = id, primary_key = true, nullable = false},
@@ -20,16 +22,19 @@ fields() ->
         #kura_field{name = password, type = string, virtual = true}
     ].
 
+-spec indexes() -> [{[atom()], map()}].
 indexes() ->
     [{[email], #{unique => true}}].
 
 %% Used by nova_auth_accounts:register/2.
+-spec registration_changeset(map(), map()) -> #kura_changeset{}.
 registration_changeset(Data, Params) ->
     CS = kura_changeset:cast(?MODULE, Data, Params, [email, password]),
     CS1 = kura_changeset:validate_required(CS, [email, password]),
     hash_password(validate_password(validate_email(CS1))).
 
 %% Used by nova_auth_accounts:change_password/4.
+-spec password_changeset(map(), map()) -> #kura_changeset{}.
 password_changeset(Data, Params) ->
     CS = kura_changeset:cast(?MODULE, Data, Params, [password]),
     CS1 = kura_changeset:validate_required(CS, [password]),
@@ -56,10 +61,18 @@ validate_email(CS) ->
                 {ok, Normalized} ->
                     CS1 = kura_changeset:put_change(CS, email, Normalized),
                     CS2 = kura_changeset:validate_length(CS1, email, [{max, 254}]),
-                    kura_changeset:unique_constraint(CS2, email);
+                    kura_changeset:unique_constraint(check_address(CS2, Normalized), email);
                 error ->
                     kura_changeset:add_error(CS, email, ~"is not valid UTF-8")
             end
+    end.
+
+%% One @ between a non-empty local part and domain. Anything stricter is
+%% better left to a confirmation email.
+check_address(CS, Email) ->
+    case binary:split(Email, ~"@", [global]) of
+        [Local, Domain] when Local =/= ~"", Domain =/= ~"" -> CS;
+        _ -> kura_changeset:add_error(CS, email, ~"must be one name, @ and a domain")
     end.
 
 %% Counted in code points; kura_changeset:validate_length/3 counts bytes.

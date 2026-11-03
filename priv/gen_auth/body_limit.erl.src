@@ -11,6 +11,8 @@
 %% the body it decodes (max_body_length, default 1 MB), but it reads a body
 %% without content-length up to that cap; this plugin refuses one unread,
 %% and keeps a lower limit for the routes it is on.
+-spec pre_request(cowboy_req:req(), term(), map(), term()) ->
+    {ok, cowboy_req:req(), term()} | {stop, cowboy_req:req(), term()}.
 pre_request(Req, _Env, Options, State) ->
     Max = maps:get(max_bytes, Options, ?MAX_BYTES),
     case cowboy_req:body_length(Req) of
@@ -22,9 +24,11 @@ pre_request(Req, _Env, Options, State) ->
             {stop, cowboy_req:reply(413, Headers, Body, Req), State}
     end.
 
+-spec post_request(cowboy_req:req(), term(), map(), term()) -> {ok, cowboy_req:req(), term()}.
 post_request(Req, _Env, _Options, State) ->
     {ok, Req, State}.
 
+-spec plugin_info() -> map().
 plugin_info() ->
     #{
         title => ~"{{app}}_body_limit",

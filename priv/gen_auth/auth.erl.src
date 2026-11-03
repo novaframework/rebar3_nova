@@ -3,6 +3,7 @@
 
 -export([config/0]).
 
+-spec config() -> map().
 config() ->
     #{
         repo => {{app}}_repo,

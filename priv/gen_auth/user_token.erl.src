@@ -4,8 +4,10 @@
 
 -export([table/0, fields/0, indexes/0, associations/0]).
 
+-spec table() -> binary().
 table() -> ~"user_tokens".
 
+-spec fields() -> [#kura_field{}].
 fields() ->
     [
         #kura_field{name = id, type = id, primary_key = true, nullable = false},
@@ -17,6 +19,7 @@ fields() ->
         #kura_field{name = inserted_at, type = utc_datetime}
     ].
 
+-spec indexes() -> [{[atom()], map()}].
 indexes() ->
     [
         {[context, token], #{unique => true}},
@@ -24,6 +27,7 @@ indexes() ->
         {[family_id], #{}}
     ].
 
+-spec associations() -> [#kura_assoc{}].
 associations() ->
     [
         #kura_assoc{
