@@ -18,6 +18,8 @@ Or run the installer, which adds the same line and keeps the rest of the file as
 
     $ bash -c "$(curl -fsSL https://raw.githubusercontent.com/novaframework/rebar3_nova/v0.14.0/install.sh)"
 
+This one-liner works once v0.14.0, the first release with this installer, is tagged; until then `curl -f` stops it with a 404, so add the plugin line above by hand.
+
 The installer comes from a release tag, as does the `install.escript` it runs (`REBAR3_NOVA_REF` picks another tag). If rebar3 is missing it offers to install rebar3 3.27.0, downloaded into a private temporary directory and run only when its sha256 matches the one GitHub publishes for that release.
 
 To track unreleased changes, use the git source instead:
