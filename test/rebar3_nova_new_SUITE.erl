@@ -25,7 +25,11 @@
     generated_erlang_compiles/1,
     templates_use_current_stack/1,
     template_sys_configs_are_valid_terms/1,
-    vm_args_keep_the_cookie_out/1
+    vm_args_keep_the_cookie_out/1,
+    compose_binds_postgres_to_loopback/1,
+    dockerfile_runs_unprivileged/1,
+    gitignore_ignores_env/1,
+    prod_database_uses_tls/1
 ]).
 
 all() ->
@@ -50,7 +54,11 @@ all() ->
         generated_erlang_compiles,
         templates_use_current_stack,
         template_sys_configs_are_valid_terms,
-        vm_args_keep_the_cookie_out
+        vm_args_keep_the_cookie_out,
+        compose_binds_postgres_to_loopback,
+        dockerfile_runs_unprivileged,
+        gitignore_ignores_env,
+        prod_database_uses_tls
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -262,8 +270,8 @@ docker_flag(_Config) ->
     assert_file_exists(Name, "Dockerfile"),
 
     Dockerfile = read_file(Name, "Dockerfile"),
-    assert_contains(Dockerfile, "FROM erlang:29 AS builder"),
-    assert_contains(Dockerfile, "FROM debian:trixie-slim"),
+    assert_contains(Dockerfile, "FROM erlang:29@sha256:"),
+    assert_contains(Dockerfile, "FROM debian:trixie-slim@sha256:"),
     assert_contains(Dockerfile, "ca-certificates"),
     assert_contains(Dockerfile, "testapp_docker"),
     assert_contains(Dockerfile, "EXPOSE 8080"),
@@ -494,6 +502,69 @@ vm_args_keep_the_cookie_out(_Config) ->
         read_file(templates_dir(), "nova_lfe/rebar.config"),
         "{vm_args_src, \"./config/vm.args.src\"}"
     ).
+
+%% The development database's postgres/postgres login must not be reachable
+%% from the network.
+compose_binds_postgres_to_loopback(_Config) ->
+    Name = "testapp_compose",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{kura => true}),
+    [
+        begin
+            assert_contains(Compose, "\"127.0.0.1:5432:5432\""),
+            assert_not_contains(Compose, "- \"5432:5432\"")
+        end
+     || Compose <- [
+            read_file(Name, "docker-compose.yml"),
+            read_file(templates_dir(), "nova_fullstack/docker-compose.yml")
+        ]
+    ].
+
+dockerfile_runs_unprivileged(_Config) ->
+    Name = "testapp_dockeruser",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{docker => true}),
+    Dockerfile = read_file(Name, "Dockerfile"),
+    [_Builder, Runtime] = string:split(Dockerfile, "\nFROM ", trailing),
+    assert_contains(Runtime, "useradd --system --uid 10001"),
+    assert_contains(Runtime, "COPY --from=builder --chown=app:app"),
+    assert_contains(Runtime, "\nUSER app\n"),
+    ?assertMatch(
+        {match, _},
+        re:run(Dockerfile, "^FROM erlang:29@sha256:[0-9a-f]{64} AS builder$", [multiline])
+    ),
+    ?assertMatch({match, _}, re:run(Runtime, "^debian:trixie-slim@sha256:[0-9a-f]{64}\n")),
+    Ignored = string:split(read_file(Name, ".dockerignore"), "\n", all),
+    [?assert(lists:member(Entry, Ignored), Entry) || Entry <- ["_build", ".git", ".env"]].
+
+gitignore_ignores_env(_Config) ->
+    Name = "testapp_gitignore",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    [
+        ?assert(lists:member(".env", string:split(GitIgnore, "\n", all)))
+     || GitIgnore <- [
+            read_file(Name, ".gitignore"),
+            read_file(templates_dir(), "nova/.gitignore"),
+            read_file(templates_dir(), "nova_fullstack/.gitignore")
+        ]
+    ].
+
+%% kura_postgres hands ssl to minato, which then verifies the server
+%% certificate against the OS trust store.
+prod_database_uses_tls(_Config) ->
+    Name = "testapp_dbtls",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{kura => true}),
+    {ok, [Generated]} = consult_env_substituted(
+        filename:join([Name, "config", "prod_sys.config.src"])
+    ),
+    Fullstack = render_template_config("nova_fullstack/prod_sys.config.src"),
+    [
+        begin
+            Kura = prop(kura, Terms),
+            ?assertEqual(true, prop(ssl, Kura)),
+            [Repo] = maps:values(prop(repos, Kura)),
+            ?assertMatch(#{ssl := true}, Repo)
+        end
+     || Terms <- [Generated, Fullstack]
+    ].
 
 template_sys_configs() ->
     [

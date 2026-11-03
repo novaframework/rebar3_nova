@@ -50,8 +50,10 @@ Then just call your plugin directly in an existing application:
 | `--docker` | A multi-stage `Dockerfile` (OTP 29 builder, Debian trixie runtime) |
 
 With `--kura`, and in `nova_fullstack`, `start/2` runs `kura_migrator:migrate/1`. Nodes that boot at the same time race on it, so for a multi-node deploy run the migrations as a release step instead.
+
 Releases keep distribution private by default: `config/vm.args.src` names the node `my_app@localhost`, binds distribution to `127.0.0.1` and takes the cookie from the `RELEASE_COOKIE` environment variable. With `RELEASE_COOKIE` unset the node uses a random `~/.erlang.cookie`; set it (to the same secret on every node, e.g. `export RELEASE_COOKIE="$(openssl rand -hex 32)"` once, stored in your secret manager) for `bin/my_app remote_console`, `rpc` and clustering. For a cluster, also switch to `-name my_app@<host>` and drop the `inet_dist_use_interface` line. Keep `-setcookie ${RELEASE_COOKIE}` the last line of the file: an empty value there ends the arguments instead of taking the next one as the cookie.
 
+With `--kura`, the prod config connects to PostgreSQL over TLS, verifying the server certificate against the OS trust store; set `DATABASE_SSL=false` (`DB_SSL` in `nova_fullstack`) only for a database on the same host or a private network. The `--docker` image runs as an unprivileged `app` user, its base images are pinned by digest, and a `.dockerignore` keeps `_build`, `.git` and `.env` out of the build context. The development `docker-compose.yml` publishes PostgreSQL on `127.0.0.1` only.
 
 Generated projects target OTP 29 and rebar3 3.27 (`.tool-versions`), depend on `{nova, "~> 0.18"}` and list `{rebar3_nova, "~> 0.13"}` as a project plugin.
 

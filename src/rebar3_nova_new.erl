@@ -779,6 +779,12 @@ sys_config_db(Name, dev, #{kura := true}) ->
 sys_config_db(Name, prod, #{kura := true}) ->
     [
         " {kura, [\n",
+        "     %% TLS to PostgreSQL is on unless DATABASE_SSL=false, which is only for a\n",
+        "     %% database on the same host or a private network. minato verifies the\n",
+        "     %% server certificate against the OS trust store and checks the hostname;\n",
+        "     %% for a private CA, add ssl_options => [{cacertfile, \"...\"}] to the repo.\n",
+        "     %% The top-level ssl is for creating the database, the repo's for the pool.\n",
+        "     {ssl, ${DATABASE_SSL:-true}},\n",
         "     {repos, #{\n",
         "         ",
         Name,
@@ -791,7 +797,8 @@ sys_config_db(Name, prod, #{kura := true}) ->
         "}\",\n",
         "             user => \"${DATABASE_USER}\",\n",
         "             password => \"${DATABASE_PASSWORD}\",\n",
-        "             pool_size => ${DATABASE_POOL_SIZE:-10}\n",
+        "             pool_size => ${DATABASE_POOL_SIZE:-10},\n",
+        "             ssl => ${DATABASE_SSL:-true}\n",
         "         }\n",
         "     }}\n",
         " ]}"
@@ -920,7 +927,8 @@ generate_gitignore(Name) ->
         ".idea\n",
         "*.iml\n",
         "rebar3.crashdump\n",
-        "*~\n"
+        "*~\n",
+        ".env\n"
     ],
     rebar3_nova_utils:write_file(Path, Content).
 
@@ -1003,7 +1011,7 @@ generate_docker_compose(Name) ->
                 Name,
                 "_dev\n",
                 "    ports:\n",
-                "      - \"5432:5432\"\n",
+                "      - \"127.0.0.1:5432:5432\"\n",
                 "    volumes:\n",
                 "      - pgdata:/var/lib/postgresql/data\n\n",
                 "volumes:\n",
@@ -1145,26 +1153,40 @@ maybe_generate_ci(_Name, _Flags) ->
 maybe_generate_docker(Name, #{docker := true}) ->
     Path = filename:join(Name, "Dockerfile"),
     Content = [
-        "FROM erlang:29 AS builder\n\n",
+        "# The base images are pinned by digest so a rebuild gets the same bits. To\n",
+        "# update one, take the digest from `docker buildx imagetools inspect <image>`.\n",
+        "FROM erlang:29@sha256:eef8acf890e463896b2890a5a11666f66d0e8812545df66e6fef77883bf4d62e AS builder\n\n",
         "WORKDIR /app\n\n",
         "COPY rebar.config rebar.lock* ./\n",
         "RUN rebar3 compile --deps_only\n\n",
         "COPY . .\n",
         "RUN rebar3 as prod release\n\n",
-        "FROM debian:trixie-slim\n\n",
+        "FROM debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4\n\n",
         "RUN apt-get update && apt-get install -y --no-install-recommends \\\n",
         "    ca-certificates libssl3t64 libncurses6 libstdc++6 libsctp1 && \\\n",
         "    rm -rf /var/lib/apt/lists/*\n\n",
+        "RUN useradd --system --uid 10001 --home-dir /app --shell /usr/sbin/nologin app && \\\n",
+        "    mkdir /app && chown app:app /app\n\n",
         "WORKDIR /app\n",
-        "COPY --from=builder /app/_build/prod/rel/",
+        "COPY --from=builder --chown=app:app /app/_build/prod/rel/",
         Name,
         " ./\n\n",
+        "USER app\n\n",
         "EXPOSE 8080\n\n",
         "CMD [\"bin/",
         Name,
         "\", \"foreground\"]\n"
     ],
-    rebar3_nova_utils:write_file(Path, Content);
+    rebar3_nova_utils:write_file(Path, Content),
+    rebar3_nova_utils:write_file(filename:join(Name, ".dockerignore"), [
+        "_build\n",
+        "_checkouts\n",
+        ".git\n",
+        ".env\n",
+        "log\n",
+        "erl_crash.dump\n",
+        "rebar3.crashdump\n"
+    ]);
 maybe_generate_docker(_Name, _Flags) ->
     ok.
 

@@ -39,6 +39,12 @@
      ]}
  ]},
  {kura, [
+     %% TLS to PostgreSQL is on unless DB_SSL=false, which is only for a
+     %% database on the same host or a private network. minato verifies the
+     %% server certificate against the OS trust store and checks the hostname;
+     %% for a private CA, add ssl_options => [{cacertfile, "..."}] to the repo.
+     %% The top-level ssl is for creating the database, the repo's for the pool.
+     {ssl, ${DB_SSL:-true}},
      {repos, #{
          {{name}}_repo => #{
              backend => kura_backend_postgres,
@@ -47,7 +53,8 @@
              database => "${DB_NAME}",
              user => "${DB_USER}",
              password => "${DB_PASSWORD}",
-             pool_size => ${DB_POOL_SIZE:-10}
+             pool_size => ${DB_POOL_SIZE:-10},
+             ssl => ${DB_SSL:-true}
          }
      }}
  ]}
