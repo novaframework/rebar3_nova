@@ -104,6 +104,7 @@ generate_project(Name, Flags) ->
     generate_dev_sys_config(Name, Flags),
     generate_prod_sys_config(Name, Flags),
     generate_vm_args(Name),
+    generate_cookie_hook(Name),
     generate_tool_versions(Name),
     generate_gitignore(Name),
     copy_favicon(Name),
@@ -215,7 +216,9 @@ rebar_relx(Name, _Flags) ->
         "    ]},\n",
         "    {mode, dev},\n",
         "    {sys_config_src, \"./config/dev_sys.config.src\"},\n",
-        "    {vm_args_src, \"./config/vm.args.src\"}\n",
+        "    {vm_args_src, \"./config/vm.args.src\"},\n",
+        "    {extended_start_script_hooks, [{pre_start, [{custom, \"hooks/require_cookie\"}]}]},\n",
+        "    {overlay, [{copy, \"rel/hooks/require_cookie\", \"bin/hooks/require_cookie\"}]}\n",
         "]}.\n\n"
     ].
 
@@ -897,6 +900,12 @@ generate_vm_args(Name) ->
         end,
     Content = binary:replace(Source, ~"{{name}}", NameBin, [global]),
     rebar3_nova_utils:write_file(Path, Content).
+
+-spec generate_cookie_hook(string()) -> ok.
+generate_cookie_hook(Name) ->
+    Path = filename:join([Name, "rel", "hooks", "require_cookie"]),
+    rebar3_nova_utils:copy_priv_file(filename:join(["templates", "nova", "require_cookie"]), Path),
+    ok = file:change_mode(Path, 8#755).
 
 %%======================================================================
 %% .tool-versions

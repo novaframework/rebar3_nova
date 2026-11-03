@@ -31,7 +31,8 @@
     erlydtl_plugin_is_pinned/1,
     gitignore_ignores_env/1,
     prod_database_uses_tls/1,
-    positional_project_name/1
+    positional_project_name/1,
+    release_requires_the_cookie/1
 ]).
 
 all() ->
@@ -62,7 +63,8 @@ all() ->
         erlydtl_plugin_is_pinned,
         gitignore_ignores_env,
         prod_database_uses_tls,
-        positional_project_name
+        positional_project_name,
+        release_requires_the_cookie
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -595,6 +597,68 @@ positional_project_name(_Config) ->
     ?assertEqual("named", rebar3_nova_new:resolve_name([{name, "named"}, {task, "my_app"}], [])),
     ?assertEqual("rest", rebar3_nova_new:resolve_name([], ["rest"])),
     ?assertError(missing_project_name, rebar3_nova_new:resolve_name([{kura, true}], [])).
+
+%% With RELEASE_COOKIE unset the node starts with an empty cookie and then
+%% bin/<app> ping, stop and remote_console cannot reach it, and daemon waits
+%% for it forever. The pre_start hook refuses to start it instead.
+release_requires_the_cookie(_Config) ->
+    Name = "testapp_cookiehook",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    Hook = filename:join(Name, "rel/hooks/require_cookie"),
+    assert_cookie_hook(prop(relx, consult_rebar_config(Name))),
+    [
+        begin
+            assert_contains(
+                read_file(templates_dir(), Template),
+                "{file, \"nova/require_cookie\", \"{{name}}/rel/hooks/require_cookie\"}"
+            ),
+            assert_cookie_hook(prop(relx, render_template_rebar_config(Config)))
+        end
+     || {Template, Config} <- [
+            {"nova.template", "nova/rebar.config"},
+            {"nova_lfe.template", "nova_lfe/rebar.config"},
+            {"nova_fullstack.template", "nova_fullstack/rebar.config"}
+        ]
+    ],
+    assert_contains(read_file(Name, "config/vm.args.src"), "RELEASE_COOKIE is required"),
+    {1, Refused} = source_hook(Hook, [{"RELEASE_COOKIE", false}]),
+    assert_contains(Refused, "RELEASE_COOKIE is not set"),
+    ?assertMatch({1, _}, source_hook(Hook, [{"RELEASE_COOKIE", ""}])),
+    ?assertEqual({0, ""}, source_hook(Hook, [{"RELEASE_COOKIE", "s3cret"}])).
+
+assert_cookie_hook(Relx) ->
+    ?assertEqual(
+        [{pre_start, [{custom, "hooks/require_cookie"}]}],
+        prop(extended_start_script_hooks, Relx)
+    ),
+    ?assert(
+        lists:member(
+            {copy, "rel/hooks/require_cookie", "bin/hooks/require_cookie"}, prop(overlay, Relx)
+        )
+    ).
+
+-spec render_template_rebar_config(string()) -> dynamic().
+render_template_rebar_config(File) ->
+    {ok, Bin} = file:read_file(templates_dir() ++ "/" ++ File),
+    Rendered = binary:replace(Bin, ~"{{name}}", ~"app", [global]),
+    ok = file:write_file("rendered_rebar.config", Rendered),
+    {ok, Terms} = file:consult("rendered_rebar.config"),
+    Terms.
+
+%% relx sources the hook from bin/<app>, so run it the same way.
+source_hook(Hook, Env) ->
+    Port = open_port(
+        {spawn_executable, "/bin/sh"},
+        [{args, ["-c", ". \"$0\"", Hook]}, {env, Env}, exit_status, stderr_to_stdout]
+    ),
+    collect_port(Port, []).
+
+collect_port(Port, Acc) ->
+    receive
+        {Port, {data, Data}} -> collect_port(Port, [Acc, Data]);
+        {Port, {exit_status, Status}} -> {Status, lists:flatten(Acc)}
+    after 10000 -> error(hook_timeout)
+    end.
 
 template_sys_configs() ->
     [

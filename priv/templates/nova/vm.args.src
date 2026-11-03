@@ -1,6 +1,6 @@
 ## Node name. Distribution listens on loopback only (below), so the node is
 ## reached from this host as {{name}}@localhost. For a cluster, switch to
-## -name {{name}}@<host>, drop inet_dist_use_interface and set RELEASE_COOKIE.
+## -name {{name}}@<host> and drop inet_dist_use_interface.
 -sname {{name}}@localhost
 
 -kernel inet_dist_use_interface {127,0,0,1}
@@ -9,8 +9,8 @@
 +K true
 +A30
 
-## The distribution cookie comes from RELEASE_COOKIE, which every node of a
-## cluster sets to the same secret. Unset, the node uses a random
-## ~/.erlang.cookie instead. Keep this line last: an empty value then ends the
-## arguments rather than taking the next one as the cookie.
+## RELEASE_COOKIE is required: it is the distribution cookie, the same secret
+## on every node of a cluster, and bin/{{name}} refuses to start the node
+## without it (rel/hooks/require_cookie). Keep this line last, so an empty
+## value can never take the next argument as the cookie.
 -setcookie ${RELEASE_COOKIE}

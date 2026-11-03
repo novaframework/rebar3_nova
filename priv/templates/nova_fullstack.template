@@ -25,6 +25,7 @@
 {template, "nova_fullstack/dev_sys.config.src", "{{name}}/config/dev_sys.config.src"}.
 {template, "nova_fullstack/prod_sys.config.src", "{{name}}/config/prod_sys.config.src"}.
 {template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
+{file, "nova/require_cookie", "{{name}}/rel/hooks/require_cookie"}.
 {template, "nova_fullstack/docker-compose.yml", "{{name}}/docker-compose.yml"}.
 
 {file, "nova_fullstack/Makefile", "{{name}}/Makefile"}.
