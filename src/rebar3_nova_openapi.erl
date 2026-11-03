@@ -213,10 +213,7 @@ build_paths(Routes, Schemas) ->
      || {Path, Method, _, _, _} = Route <- Routes
     ],
     Paths = lists:usort([Path || {Path, _, _} <- Operations]),
-    maps:from_list([
-        {Path, maps:from_list([{M, Op} || {P, M, Op} <- Operations, P =:= Path])}
-     || Path <- Paths
-    ]).
+    #{Path => #{M => Op || {P, M, Op} <- Operations, P =:= Path} || Path <- Paths}.
 
 operation_id(Module, Function) ->
     <<(atom_to_binary(Module))/binary, ".", (atom_to_binary(Function))/binary>>.

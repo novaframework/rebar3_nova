@@ -30,14 +30,12 @@ init(State) ->
 do(State) ->
     App = atom_to_list(rebar3_nova_utils:get_app_name(State)),
     AppDir = rebar3_nova_utils:get_app_dir(State),
-    lists:foreach(
-        fun({Template, Path}) ->
-            rebar3_nova_utils:write_file_if_not_exists(
-                filename:join(AppDir, Path), render(Template, App)
-            )
-        end,
-        files(App)
-    ),
+    _ = [
+        rebar3_nova_utils:write_file_if_not_exists(
+            filename:join(AppDir, Path), render(Template, App)
+        )
+     || {Template, Path} <- files(App)
+    ],
     print_instructions(App),
     {ok, State}.
 
@@ -62,9 +60,13 @@ files(App) ->
 -doc "A template with `{{app}}` replaced by the application name.".
 -spec render(string(), string()) -> binary().
 render(Template, App) ->
-    Path = filename:join([code:priv_dir(rebar3_nova), "gen_auth", Template]),
-    {ok, Source} = file:read_file(Path),
-    binary:replace(Source, ~"{{app}}", unicode:characters_to_binary(App), [global]).
+    {ok, Source} = file:read_file(filename:join([priv_dir(), "gen_auth", Template])),
+    binary:replace(Source, ~"{{app}}", rebar3_nova_utils:to_binary(App), [global]).
+
+priv_dir() ->
+    case code:priv_dir(rebar3_nova) of
+        Dir when is_list(Dir) -> Dir
+    end.
 
 print_instructions(App) ->
     rebar_api:info(

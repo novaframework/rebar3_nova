@@ -79,8 +79,9 @@ resource_schema_does_not_require_id(_Config) ->
 resource_route_hints_use_funs(_Config) ->
     Hints = rebar3_nova_gen_resource:route_hints(blog, "tags", ?ACTIONS),
     ?assertEqual(5, length(Hints)),
-    ?assertEqual($}, lists:last(lists:last(Hints))),
-    ?assertEqual($,, lists:last(hd(Hints))),
+    [First, _, _, _, Last] = Hints,
+    $, = lists:last(First),
+    $} = lists:last(Last),
     Routes = [eval_hint(H) || H <- Hints],
     [?assert(is_list(Path)) || {Path, _Fun, _Opts} <- Routes],
     [?assert(is_function(Fun, 1)) || {_Path, Fun, _Opts} <- Routes],
@@ -88,9 +89,8 @@ resource_route_hints_use_funs(_Config) ->
         [{"/tags", _, #{methods := [post], extra_state := #{json_schema := "schemas/tag.json"}}}],
         [R || {_, _, #{methods := [post]}} = R <- Routes]
     ),
-    ?assertEqual(
-        {module, blog_tags_controller}, erlang:fun_info(element(2, hd(Routes)), module)
-    ).
+    [{_, ListFun, _} | _] = Routes,
+    ?assertEqual({module, blog_tags_controller}, erlang:fun_info(ListFun, module)).
 
 test_suite_follows_the_routes(_Config) ->
     rebar3_nova_test_router:set_routes([
@@ -186,19 +186,26 @@ suite_source() ->
     ]).
 
 compile_source(Config, Name, Source) ->
-    File = filename:join(?config(priv_dir, Config), Name ++ ".erl"),
+    File = ?config(priv_dir, Config) ++ "/" ++ Name ++ ".erl",
     ok = file:write_file(File, Source),
     {ok, Module, Binary} = compile:file(File, [binary, return_errors]),
+    true = is_atom(Module) andalso is_binary(Binary),
     {module, Module} = code:load_binary(Module, File, Binary),
     Module.
 
 assert_formatted(Source) ->
-    Text = unicode:characters_to_list(Source),
+    Text = binary_to_list(Source),
     {ok, Formatted, _Warnings} = erlfmt:format_string(Text, []),
     ?assertEqual(Text, Formatted).
 
+-spec eval_hint(string()) -> term().
 eval_hint(Hint) ->
-    {ok, Tokens, _} = erl_scan:string(string:trim(Hint, trailing, ",") ++ "."),
+    Expression =
+        case lists:last(Hint) of
+            $, -> lists:droplast(Hint);
+            _ -> Hint
+        end,
+    {ok, Tokens, _} = erl_scan:string(Expression ++ "."),
     {ok, [Expr]} = erl_parse:parse_exprs(Tokens),
     {value, Value, _} = erl_eval:expr(Expr, []),
     Value.

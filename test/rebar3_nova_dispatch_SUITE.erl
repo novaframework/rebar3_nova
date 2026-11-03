@@ -32,7 +32,6 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
--include_lib("nova/include/nova_router.hrl").
 
 all() ->
     [

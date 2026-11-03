@@ -131,8 +131,7 @@ summarize_strict_clean(_Config) ->
 
 config_json_lib_is_read_from_the_bootstrap_app(_Config) ->
     Config = [{nova, [{bootstrap_application, blog}]}, {blog, [{json_lib, my_json}]}],
-    [Json | _] = rebar3_nova_doctor:config_findings(Config, blog, ok),
-    ?assertEqual("json_lib = my_json", lists:flatten(element(2, Json))),
+    ?assertEqual("json_lib = my_json", hd(ok_messages(Config))),
     ?assertEqual([], [F || F <- findings(Config, ok), element(1, F) =/= ok]).
 
 config_raw_otp_json_is_an_error(_Config) ->
@@ -158,11 +157,7 @@ config_session_backend_warns(_Config) ->
 config_sessions_disabled(_Config) ->
     Config = [{nova, [{bootstrap_application, blog}]}, {blog, [{use_sessions, false}]}],
     ?assertEqual([], warnings(Config)),
-    ?assert(
-        lists:any(
-            fun(M) -> string:find(M, "sessions disabled") =/= nomatch end, ok_messages(Config)
-        )
-    ).
+    ?assertMatch([_], [M || "sessions disabled" ++ _ = M <- ok_messages(Config)]).
 
 findings(Config, JsonStatus) ->
     rebar3_nova_doctor:config_findings(Config, blog, JsonStatus).

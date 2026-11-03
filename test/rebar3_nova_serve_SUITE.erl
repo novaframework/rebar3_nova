@@ -62,9 +62,9 @@ fs_backend_matches_fs(_Config) ->
     ?assertEqual(undefined, rebar3_nova_serve:fs_backend({unix, sunos})).
 
 missing_inotifywait_is_reported(_Config) ->
-    Problem = rebar3_nova_serve:watcher_problem({unix, linux}, false),
-    ?assert(is_list(Problem)),
-    ?assertNotEqual(nomatch, string:find(Problem, "inotify-tools")),
+    "rebar3 nova serve needs inotifywait" ++ Hint =
+        rebar3_nova_serve:watcher_problem({unix, linux}, false),
+    ?assertNotEqual(nomatch, string:find(Hint, "inotify-tools")),
     ?assert(is_list(rebar3_nova_serve:watcher_problem({unix, sunos}, unsupported))).
 
 found_watcher_is_not_a_problem(_Config) ->

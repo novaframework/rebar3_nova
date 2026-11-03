@@ -5,8 +5,6 @@
 %% Exported for rebar3_nova_dispatch_SUITE.
 -export([collect_route_handlers/1]).
 
--include("nova_router.hrl").
-
 -ifdef(TEST).
 -export([
     summarize/1,

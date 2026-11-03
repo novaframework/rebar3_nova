@@ -10,7 +10,8 @@
     parse_actions/1,
     load_sys_config/1,
     compile_routes/2,
-    router_module/1
+    router_module/1,
+    to_binary/1
 ]).
 
 -spec get_app_name(rebar_state:t()) -> atom().
@@ -23,18 +24,18 @@ get_app_dir(State) ->
     [Hd | _] = rebar_state:project_apps(State),
     rebar_app_info:dir(Hd).
 
--spec ensure_dir(file:filename()) -> ok.
+-spec ensure_dir(file:filename_all()) -> ok.
 ensure_dir(Path) ->
     filelib:ensure_dir(Path).
 
--spec write_file(file:filename(), iodata()) -> ok.
+-spec write_file(file:filename_all(), iodata()) -> ok.
 write_file(Path, Content) ->
     ok = ensure_dir(Path),
     ok = file:write_file(Path, Content),
     log_info("Created ~s", [Path]),
     ok.
 
--spec write_file_if_not_exists(file:filename(), iodata()) -> ok | skipped.
+-spec write_file_if_not_exists(file:filename_all(), iodata()) -> ok | skipped.
 write_file_if_not_exists(Path, Content) ->
     case filelib:is_regular(Path) of
         true ->
@@ -93,6 +94,13 @@ compile_routes(State, App) ->
                 "later. Upgrade the project's nova dependency.",
                 []
             )
+    end.
+
+-doc "Text as a UTF-8 binary.".
+-spec to_binary(unicode:chardata()) -> binary().
+to_binary(Chars) ->
+    case unicode:characters_to_binary(Chars) of
+        Bin when is_binary(Bin) -> Bin
     end.
 
 -doc "The router module Nova uses for `App`: its `router_module` env, or `App_router`.".

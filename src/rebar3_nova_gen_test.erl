@@ -62,15 +62,24 @@ format_error(Reason) ->
 -doc "The routes served by `Controller` in a compiled dispatch table, in path order.".
 -spec controller_routes(nova_routing_trie:trie(), module()) -> [route()].
 controller_routes(Dispatch, Controller) ->
-    lists:usort([
-        {rebar3_nova_dispatch:method_to_binary(Method), Path, Function}
-     || {Path, Method, Payload} <- rebar3_nova_dispatch:routes(Dispatch),
-        {controller, Module, Function} <- [rebar3_nova_dispatch:handler(Payload)],
-        Module =:= Controller
-    ]).
+    lists:sort(
+        lists:append([
+            controller_route(Path, Method, Payload, Controller)
+         || {Path, Method, Payload} <- rebar3_nova_dispatch:routes(Dispatch)
+        ])
+    ).
+
+-spec controller_route(binary(), '_' | binary(), term(), module()) -> [route()].
+controller_route(Path, Method, Payload, Controller) ->
+    case rebar3_nova_dispatch:handler(Payload) of
+        {controller, Controller, Function} ->
+            [{rebar3_nova_dispatch:method_to_binary(Method), Path, Function}];
+        _ ->
+            []
+    end.
 
 default_routes(Name) ->
-    Base = unicode:characters_to_binary("/" ++ Name),
+    Base = rebar3_nova_utils:to_binary("/" ++ Name),
     [
         {~"get", Base, list},
         {~"get", <<Base/binary, "/:id">>, show},
@@ -96,7 +105,7 @@ generate_content(SuiteName, AppName, Routes) ->
     Cases = test_cases(Routes),
     App = atom_to_list(AppName),
     Names = [Case || {Case, _, _, _} <- Cases],
-    unicode:characters_to_binary([
+    rebar3_nova_utils:to_binary([
         "-module(",
         SuiteName,
         ").\n"
@@ -106,13 +115,13 @@ generate_content(SuiteName, AppName, Routes) ->
         "\n"
         "-export([all/0, init_per_suite/1, end_per_suite/1]).\n"
         "-export([\n",
-        lists:join(",\n", ["    " ++ N ++ "/1" || N <- Names]),
+        string:join(["    " ++ N ++ "/1" || N <- Names], ",\n"),
         "\n"
         "]).\n"
         "\n"
         "all() ->\n"
         "    [\n",
-        lists:join(",\n", ["        " ++ N || N <- Names]),
+        string:join(["        " ++ N || N <- Names], ",\n"),
         "\n"
         "    ].\n"
         "\n"
@@ -155,11 +164,10 @@ case_name(Name, Method, Shared) ->
     end.
 
 request_path(Path) ->
-    Segments = [binding_value(S) || S <- binary:split(Path, ~"/", [global])],
-    binary_to_list(iolist_to_binary(lists:join(~"/", Segments))).
+    string:join([binding_value(S) || S <- binary:split(Path, ~"/", [global])], "/").
 
-binding_value(<<":", _/binary>>) -> ~"1";
-binding_value(Segment) -> Segment.
+binding_value(<<":", _/binary>>) -> "1";
+binding_value(Segment) -> binary_to_list(Segment).
 
 expected_status(~"post") -> "201";
 expected_status(~"delete") -> "204";

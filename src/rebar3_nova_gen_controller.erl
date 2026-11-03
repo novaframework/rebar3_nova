@@ -54,9 +54,9 @@ generate(AppName, AppDir, Name, Actions) ->
 -doc "The source of a controller with a stub per action, formatted as erlfmt would.".
 -spec generate_content(atom(), [atom()]) -> binary().
 generate_content(ModName, Actions) ->
-    Exports = lists:join(",\n", ["    " ++ atom_to_list(A) ++ "/1" || A <- Actions]),
+    Exports = string:join(["    " ++ atom_to_list(A) ++ "/1" || A <- Actions], ",\n"),
     Header = ["-module(", atom_to_list(ModName), ").\n\n-export([\n", Exports, "\n]).\n"],
-    unicode:characters_to_binary([Header | ["\n" ++ generate_function(A) || A <- Actions]]).
+    rebar3_nova_utils:to_binary([Header | ["\n" ++ generate_function(A) || A <- Actions]]).
 
 generate_function(create) ->
     "create(_Req) ->\n"
