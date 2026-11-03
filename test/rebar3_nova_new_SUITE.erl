@@ -32,7 +32,8 @@
     gitignore_ignores_env/1,
     prod_database_uses_tls/1,
     positional_project_name/1,
-    release_requires_the_cookie/1
+    release_requires_the_cookie/1,
+    pgo_prod_pool_uses_tls/1
 ]).
 
 all() ->
@@ -64,7 +65,8 @@ all() ->
         gitignore_ignores_env,
         prod_database_uses_tls,
         positional_project_name,
-        release_requires_the_cookie
+        release_requires_the_cookie,
+        pgo_prod_pool_uses_tls
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -631,6 +633,23 @@ release_requires_the_cookie(_Config) ->
     assert_contains(Refused, "RELEASE_COOKIE is not set"),
     ?assertMatch({1, _}, source_hook(Hook, [{"RELEASE_COOKIE", ""}])),
     ?assertEqual({0, ""}, source_hook(Hook, [{"RELEASE_COOKIE", "s3cret"}])).
+
+%% pgo hands ssl_options straight to ssl:connect/2, which since OTP 26
+%% refuses verify_peer without a trust store and checks the host name only
+%% against server_name_indication on an upgraded socket.
+pgo_prod_pool_uses_tls(_Config) ->
+    Name = "testapp_pgotls",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{pgo => true}),
+    {ok, [Terms]} = consult_env_substituted(Name ++ "/config/prod_sys.config.src"),
+    [{default, Pool}] = prop(pools, prop(pgo, Terms)),
+    ?assertMatch(#{ssl := true, ssl_options := _}, Pool),
+    SslOptions = maps:get(ssl_options, Pool),
+    ?assertEqual(verify_peer, prop(verify, SslOptions)),
+    ?assertEqual("/etc/ssl/certs/ca-certificates.crt", prop(cacertfile, SslOptions)),
+    ?assert(lists:keymember(server_name_indication, 1, SslOptions)),
+    Source = read_file(Name, "config/prod_sys.config.src"),
+    assert_contains(Source, "ssl => ${DATABASE_SSL:-true}"),
+    assert_contains(Source, "{server_name_indication, \"${DATABASE_HOST}\"}").
 
 assert_cookie_hook(Relx) ->
     ?assertEqual(
