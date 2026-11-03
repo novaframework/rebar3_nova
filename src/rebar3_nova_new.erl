@@ -57,12 +57,12 @@ format_error(Reason) ->
 The project name: `--name`, else the first positional argument, which rebar3
 hands a namespaced provider as the `task` option rather than in `Args`.
 """.
--spec resolve_name([{atom(), dynamic()}], [string()]) -> dynamic().
+-spec resolve_name([{atom(), dynamic()}], [string()]) -> string().
 resolve_name(Opts, Args) ->
-    case {proplists:get_value(name, Opts), proplists:get_value(task, Opts), Args} of
-        {Name, _, _} when is_list(Name) -> Name;
-        {undefined, Name, _} when is_list(Name) -> Name;
-        {undefined, undefined, [Name | _]} -> Name;
+    case {[N || {name, N} <- Opts], [T || {task, T} <- Opts], Args} of
+        {[Name | _], _, _} -> Name;
+        {[], [Name | _], _} -> Name;
+        {[], [], [Name | _]} -> Name;
         _ -> error(missing_project_name)
     end.
 
@@ -913,8 +913,8 @@ generate_vm_args(Name) ->
 
 -spec generate_cookie_hook(string()) -> ok.
 generate_cookie_hook(Name) ->
-    Path = filename:join([Name, "rel", "hooks", "require_cookie"]),
-    rebar3_nova_utils:copy_priv_file(filename:join(["templates", "nova", "require_cookie"]), Path),
+    Path = Name ++ "/rel/hooks/require_cookie",
+    rebar3_nova_utils:copy_priv_file("templates/nova/require_cookie", Path),
     ok = file:change_mode(Path, 8#755).
 
 %%======================================================================

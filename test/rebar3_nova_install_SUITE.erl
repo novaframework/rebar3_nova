@@ -109,7 +109,7 @@ installer_downloads_into_an_unguessable_dir(Config) ->
                     {match, _}, re:run(filename:basename(Dir), "^rebar3_nova_install_[0-9a-f]{32}$")
                 ),
                 {ok, #file_info{mode = Mode}} = file:read_file_info(Dir),
-                ?assertEqual(8#700, Mode band 8#777)
+                ?assert(is_integer(Mode) andalso Mode band 8#777 =:= 8#700)
             end
          || Dir <- Dirs
         ]
@@ -124,7 +124,7 @@ installer_exits_non_zero_on_errors(Config) ->
     write_global_config(Broken, "{plugins, [\n"),
     ?assertEqual("1", run_installer(Broken, os:getenv("PATH"))),
     NoRebar3 = home(Config, "no_rebar3"),
-    Path = filename:join(code:root_dir(), "bin") ++ ":/usr/bin:/bin",
+    Path = code:root_dir() ++ "/bin:/usr/bin:/bin",
     ?assertEqual(false, os:find_executable("rebar3", Path)),
     ?assertEqual("1", run_installer(NoRebar3, Path)).
 
@@ -143,15 +143,20 @@ run_installer(Home, Path) ->
     string:trim(os:cmd(lists:flatten(Cmd))).
 
 %% The escript body, compiled as a module so its functions can be called.
+-spec installer_module(ct_suite:ct_config()) -> module().
 installer_module(Config) ->
     {ok, Sections} = escript:extract(repo_path("install.escript"), []),
-    {source, Source} = lists:keyfind(source, 1, Sections),
-    Path = filename:join(?config(priv_dir, Config), "rebar3_nova_installer.erl"),
-    ok = file:write_file(Path, ["-module(rebar3_nova_installer).\n", Source]),
-    {ok, Forms} = epp:parse_file(Path, []),
-    {ok, Mod, Bin} = compile:forms(Forms, [export_all, nowarn_export_all]),
-    {module, Mod} = code:load_binary(Mod, Path, Bin),
-    Mod.
+    [Source] = [Bin || {source, Bin} <- Sections],
+    Path =
+        case ?config(priv_dir, Config) of
+            Dir when is_list(Dir) -> Dir ++ "/rebar3_nova_installer.erl"
+        end,
+    ok = file:write_file(Path, [~"-module(rebar3_nova_installer).\n", Source]),
+    {ok, rebar3_nova_installer, Beam} =
+        compile:file(Path, [binary, export_all, nowarn_export_all]),
+    true = is_binary(Beam),
+    {module, rebar3_nova_installer} = code:load_binary(rebar3_nova_installer, Path, Beam),
+    rebar3_nova_installer.
 
 repo_path(Name) ->
     filename:join([lib_dir(), "..", "..", "..", "..", Name]).
