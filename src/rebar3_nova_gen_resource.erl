@@ -71,22 +71,50 @@ schema() ->
     }.
 
 print_route_hints(AppName, Name, Actions) ->
-    rebar_api:info("~nAdd these routes to your router:~n", []),
+    rebar_api:info("~nAdd these route groups to your router:~n", []),
     lists:foreach(
-        fun(Hint) -> rebar_api:info("  ~ts", [Hint]) end, route_hints(AppName, Name, Actions)
+        fun(Line) -> rebar_api:info("  ~ts", [Line]) end,
+        string:split(route_hints(AppName, Name, Actions), "\n", all)
     ).
 
--doc "Router entries for the generated actions, in the `fun Mod:Fun/1` form Nova expects.".
--spec route_hints(atom(), string(), [atom()]) -> [string()].
+-doc """
+Route groups for the actions: reads in one, and create, update and delete in
+another behind a security function, so the writes are not public by default.
+""".
+-spec route_hints(atom(), string(), [atom()]) -> string().
 route_hints(AppName, Name, Actions) ->
     Controller = lists:flatten(io_lib:format("~s_~s_controller", [AppName, Name])),
     Schema = "schemas/" ++ singularize(Name) ++ ".json",
-    separate([Hint || Action <- Actions, Hint <- route_hint(Action, Name, Controller, Schema)]).
+    Routes = fun(Wanted) ->
+        [
+            Hint
+         || Action <- Actions,
+            lists:member(Action, Wanted),
+            Hint <- route_hint(Action, Name, Controller, Schema)
+        ]
+    end,
+    Security = io_lib:format(
+        "  %% Placeholder: require_bearer/1 comes from `rebar3 nova gen_auth`; use your own\n"
+        "  %% security function if you have one.\n"
+        "  security => fun ~s_auth_security:require_bearer/1,\n",
+        [AppName]
+    ),
+    Groups =
+        [route_group("", Reads) || Reads <- [Routes([list, show])], Reads =/= []] ++
+            [
+                route_group(Security, Writes)
+             || Writes <- [Routes([create, update, delete])], Writes =/= []
+            ],
+    lists:flatten(lists:join(",\n", Groups)).
 
--spec separate([string()]) -> [string()].
-separate([]) -> [];
-separate([Last]) -> [Last];
-separate([Hint | Rest]) -> [Hint ++ "," | separate(Rest)].
+route_group(Security, Routes) ->
+    [
+        "#{prefix => \"\",\n",
+        Security,
+        "  routes => [\n",
+        lists:join(",\n", ["      " ++ Route || Route <- Routes]),
+        "\n  ]}"
+    ].
 
 route_hint(list, Name, Controller, _Schema) ->
     hint("/" ++ Name, Controller, list, "get", "");

@@ -83,13 +83,24 @@ $ rebar3 nova gen_resource --name products
 ===> Created src/controllers/myapp_products_controller.erl
 ===> Created priv/schemas/product.json
 ===>
-===> Add these routes to your router:
-===>   {"/products", fun myapp_products_controller:list/1, #{methods => [get]}},
-===>   {"/products/:id", fun myapp_products_controller:show/1, #{methods => [get]}},
-===>   {"/products", fun myapp_products_controller:create/1, #{methods => [post], extra_state => #{json_schema => "schemas/product.json"}}},
-===>   {"/products/:id", fun myapp_products_controller:update/1, #{methods => [put], extra_state => #{json_schema => "schemas/product.json"}}},
-===>   {"/products/:id", fun myapp_products_controller:delete/1, #{methods => [delete]}}
+===> Add these route groups to your router:
+===>   #{prefix => "",
+===>     routes => [
+===>         {"/products", fun myapp_products_controller:list/1, #{methods => [get]}},
+===>         {"/products/:id", fun myapp_products_controller:show/1, #{methods => [get]}}
+===>     ]},
+===>   #{prefix => "",
+===>     %% Placeholder: require_bearer/1 comes from `rebar3 nova gen_auth`; use your own
+===>     %% security function if you have one.
+===>     security => fun myapp_auth_security:require_bearer/1,
+===>     routes => [
+===>         {"/products", fun myapp_products_controller:create/1, #{methods => [post], extra_state => #{json_schema => "schemas/product.json"}}},
+===>         {"/products/:id", fun myapp_products_controller:update/1, #{methods => [put], extra_state => #{json_schema => "schemas/product.json"}}},
+===>         {"/products/:id", fun myapp_products_controller:delete/1, #{methods => [delete]}}
+===>     ]}
 ```
+
+Create, update and delete come in a group of their own behind a `security` function, so pasting the snippet does not make the writes public. Until you replace the placeholder or run `gen_auth`, those routes fail closed.
 
 **Options:** Same as `gen_controller`.
 

@@ -11,6 +11,7 @@
     resource_schema_is_draft_06/1,
     resource_schema_does_not_require_id/1,
     resource_route_hints_use_funs/1,
+    resource_write_hints_are_behind_security/1,
     test_suite_follows_the_routes/1,
     test_suite_compiles/1,
     test_suite_is_erlfmt_formatted/1,
@@ -37,6 +38,7 @@ all() ->
         resource_schema_is_draft_06,
         resource_schema_does_not_require_id,
         resource_route_hints_use_funs,
+        resource_write_hints_are_behind_security,
         test_suite_follows_the_routes,
         test_suite_compiles,
         test_suite_is_erlfmt_formatted,
@@ -92,12 +94,11 @@ resource_schema_does_not_require_id(_Config) ->
     ?assertMatch(#{~"required" := [~"name"]}, rebar3_nova_gen_resource:schema()).
 
 resource_route_hints_use_funs(_Config) ->
-    Hints = rebar3_nova_gen_resource:route_hints(blog, "tags", ?ACTIONS),
-    ?assertEqual(5, length(Hints)),
-    [First, _, _, _, Last] = Hints,
-    $, = lists:last(First),
-    $} = lists:last(Last),
-    Routes = [eval_hint(H) || H <- Hints],
+    [Reads, Writes] = eval_hint(
+        "[" ++ rebar3_nova_gen_resource:route_hints(blog, "tags", ?ACTIONS) ++ "]"
+    ),
+    Routes = maps:get(routes, Reads) ++ maps:get(routes, Writes),
+    ?assertEqual(5, length(Routes)),
     [?assert(is_list(Path)) || {Path, _Fun, _Opts} <- Routes],
     [?assert(is_function(Fun, 1)) || {_Path, Fun, _Opts} <- Routes],
     ?assertMatch(
@@ -106,6 +107,23 @@ resource_route_hints_use_funs(_Config) ->
     ),
     [{_, ListFun, _} | _] = Routes,
     ?assertEqual({module, blog_tags_controller}, erlang:fun_info(ListFun, module)).
+
+%% Create, update and delete hints used to be printed bare, ready to paste
+%% into a public group.
+resource_write_hints_are_behind_security(_Config) ->
+    [Reads, Writes] = eval_hint(
+        "[" ++ rebar3_nova_gen_resource:route_hints(blog, "tags", ?ACTIONS) ++ "]"
+    ),
+    ?assertEqual(false, maps:is_key(security, Reads)),
+    ?assertEqual([[get], [get]], [maps:get(methods, O) || {_, _, O} <- maps:get(routes, Reads)]),
+    ?assertEqual(fun blog_auth_security:require_bearer/1, maps:get(security, Writes)),
+    ?assertEqual(
+        [[post], [put], [delete]], [maps:get(methods, O) || {_, _, O} <- maps:get(routes, Writes)]
+    ),
+    [OnlyWrites] = eval_hint(
+        "[" ++ rebar3_nova_gen_resource:route_hints(blog, "tags", [create]) ++ "]"
+    ),
+    ?assert(maps:is_key(security, OnlyWrites)).
 
 test_suite_follows_the_routes(_Config) ->
     rebar3_nova_test_router:set_routes([
@@ -318,12 +336,7 @@ assert_formatted(Source) ->
     ?assertEqual(Text, Formatted).
 
 -spec eval_hint(string()) -> term().
-eval_hint(Hint) ->
-    Expression =
-        case lists:last(Hint) of
-            $, -> lists:droplast(Hint);
-            _ -> Hint
-        end,
+eval_hint(Expression) ->
     {ok, Tokens, _} = erl_scan:string(Expression ++ "."),
     {ok, [Expr]} = erl_parse:parse_exprs(Tokens),
     {value, Value, _} = erl_eval:expr(Expr, []),
