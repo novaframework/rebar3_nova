@@ -90,9 +90,16 @@ $ rebar3 nova gen_resource --name products
 ===>         {"/products/:id", fun myapp_products_controller:show/1, #{methods => [get]}}
 ===>     ]},
 ===>   #{prefix => "",
-===>     %% Placeholder: require_bearer/1 comes from `rebar3 nova gen_auth`; use your own
-===>     %% security function if you have one.
+===>     %% Placeholder: require_bearer/1 and myapp_body_limit come from
+===>     %% `rebar3 nova gen_auth`; use your own if you have them.
 ===>     security => fun myapp_auth_security:require_bearer/1,
+===>     %% Plugins run before security, so the group sets its own instead of
+===>     %% inheriting a global body decoder that reads any size of body.
+===>     plugins => [
+===>         {pre_request, myapp_body_limit, #{}},
+===>         {pre_request, nova_request_plugin, #{decode_json_body => true}},
+===>         {pre_request, nova_json_schemas, #{}}
+===>     ],
 ===>     routes => [
 ===>         {"/products", fun myapp_products_controller:create/1, #{methods => [post], extra_state => #{json_schema => "schemas/product.json"}}},
 ===>         {"/products/:id", fun myapp_products_controller:update/1, #{methods => [put], extra_state => #{json_schema => "schemas/product.json"}}},
@@ -100,7 +107,7 @@ $ rebar3 nova gen_resource --name products
 ===>     ]}
 ```
 
-Create, update and delete come in a group of their own behind a `security` function, so pasting the snippet does not make the writes public. Until you replace the placeholder or run `gen_auth`, those routes fail closed.
+Create, update and delete come in a group of their own behind a `security` function, so pasting the snippet does not make the writes public. Until you replace the placeholder or run `gen_auth`, those routes fail closed. The group lists its own plugins, because Nova runs pre-request plugins before security: an inherited global body decoder would read a body of any size from a request without a token. A group's plugins replace the global ones, so `nova_json_schemas` is listed again when a route has a `json_schema`.
 
 **Options:** Same as `gen_controller`.
 
@@ -145,10 +152,10 @@ It then prints the deps (`nova_auth`, `kura`, `kura_postgres`), the `rebar3_kura
 - Registration takes `email`, `password` and `password_confirmation`. The changesets drop the plaintext from the changeset's changes and params once hashed, valid or not, so it does not reach a log in `{error, Changeset}`.
 - `email_changeset/2` (used by `nova_auth_accounts:change_identity/4`) resets `confirmed_at` when the address really changes; `password_changeset/2` hashes the new password.
 - The token schema has `family_id` and `used_at`, which `nova_auth_refresh` needs.
-- The public route group runs `myapp_rate_limit`, then `myapp_body_limit`, then `nova_request_plugin`, so a flood or an oversized body (or a chunked one, which has no length up front) is refused with 429 or 413 before anything reads it. The bearer group sets `plugins => []`: Nova runs pre-request plugins before security, so a global body-decoding plugin would read the body of a request that has no token at all.
+- The public route group runs `myapp_rate_limit`, then `myapp_body_limit`, then `nova_request_plugin`, so a flood or an oversized body (or a chunked one, which has no length up front) is refused with 429 or 413 before anything reads it. The bearer group sets `plugins => []`: Nova runs pre-request plugins before security, so a global body-decoding plugin would read the body of a request that has no token at all. The instructions print a protected group for your own routes with `myapp_body_limit` before `nova_request_plugin`, for the same reason. The 413 reply sets no `connection` header, which HTTP/2 forbids.
 - `require_bearer/1` reads the `Authorization` header bytewise (anything but a well-formed `Bearer <b64token>` is a 401, never a crash) and puts only the user's `id` and `email` in `auth_data`, never the password hash.
-- The rate limit keys on the client address: one bucket per IPv4 address and per IPv6 /64, with IPv4-mapped addresses unmapped. The address is the TCP peer unless the peer is in `{trusted_proxies, [...]}` in the app env (addresses or `{Address, PrefixLength}` ranges, default `[]`); then it is the right-most `x-forwarded-for` address that is not a trusted proxy. Once nova_auth 0.3 is released, its `nova_auth_rate_limit:client_ip/1` replaces this code.
-- `login/1` also allows 20 attempts per normalised email in 15 minutes, whatever the address, so rotating addresses does not buy unlimited guesses. The limit is generous so that failing logins in someone's name hardly locks them out.
+- The rate limit keys on the client address: one bucket per IPv4 address and per IPv6 /64, with IPv4-mapped addresses unmapped. The address is the TCP peer unless the peer is in `{trusted_proxies, [...]}` in the app env (address tuples or `{Address, PrefixLength}` ranges, default `[]`); then it is the right-most `x-forwarded-for` address that is not a trusted proxy. Hops may carry a port (`192.0.2.1:8080`, `[2001:db8::1]:443`) and empty hops are skipped. A mistyped entry, such as a string or a prefix length out of range, raises `invalid_trusted_proxy` on the first request instead of being ignored. Once nova_auth 0.3 is released, its `nova_auth_rate_limit:client_ip/1` replaces this code.
+- `login/1` also allows 20 attempts per normalised (NFC, lowercased) email in 15 minutes, whatever the address, so rotating addresses does not buy unlimited guesses. The limit is generous so that failing logins in someone's name hardly locks them out.
 - Registration answers 422 for a taken email, which tells anyone which addresses have accounts. Put email confirmation in front of it if that matters.
 - The tokens are bearer tokens, so the printed instructions turn Nova's session cookie off with `{use_sessions, false}` in the app's env.
 
@@ -239,16 +246,16 @@ Warns if `bootstrap_application` is not set.
 
 ### `nova audit` — Audit route security
 
-Checks compiled routes for common security issues and prints findings grouped by severity. The routes are those of the application and of the `nova_apps` declared for it in sys.config (nested ones included), compiled for one Nova environment, so routes that `routes(prod)` returns are audited with `--env prod`. The first line of the report says what was audited and what was not.
+Checks compiled routes for common security issues and prints findings grouped by severity. The routes are those of the application and of the `nova_apps` declared for it in sys.config (nested ones included), compiled for one Nova environment, so routes that `routes(prod)` returns are audited with `--env prod`. The first line of the report says what was audited, what was not and which config `nova_apps` came from. `nova_apps` are read from the shell config unless `--config` names another; with an `--env` other than `dev` and no `--config`, the report notes that the dev config was used. A `.config.src` works: `${VAR}` and `${VAR:-Default}` are replaced from the environment or the default before it is read, as relx does. The audit sets the Nova environment and the `router_module`s from the config only while it compiles the routes.
 
 `audit` and `openapi` read Nova's route records as nova 0.18.1 defines them. A route whose handler they do not recognise, as a later nova that changes those records would cause, is left out of the report and named in a warning; upgrade rebar3_nova when you see one.
 
 ```
-$ rebar3 nova audit --env prod
+$ rebar3 nova audit --env prod --config config/prod_sys.config.src
 
 === Security Audit ===
 
-  Audited routes(prod) of myapp. Not covered: static files and error pages.
+  Audited routes(prod) of myapp. Not covered: static files and error pages. nova_apps read from config/prod_sys.config.src.
 
   WARNINGS:
     POST /users (myapp_users_controller) has no security
@@ -267,7 +274,7 @@ $ rebar3 nova audit --env prod
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
 | `--env`, `-e` | no | `dev` | Nova environment passed to the routers' `routes/1` |
-| `--config`, `-c` | no | the shell config | sys.config to read `nova_apps` (and `router_module`) from |
+| `--config`, `-c` | no | the shell config | sys.config or `.config.src` to read `nova_apps` (and `router_module`) from |
 | `--strict`, `-s` | no | `false` | Fail when there are warnings, for CI |
 
 **Rules checked:**
@@ -322,7 +329,7 @@ Summary: 67 ok, 2 warning(s), 0 error(s)
 | `config` | `json_lib` (read from the bootstrap app) is loaded and exports `encode/1` and `decode/1`; `{json_lib, json}` is an error with a Nova whose request decoding expects `{ok, Term}`; `json_lib` set under `nova`; Cowboy port; `session_manager`, `use_sessions`, and the unused `session_backend` key |
 | `routes` | Every compiled route resolves to an exported handler (or captured fun); flags duplicate `{method, path}` pairs |
 | `deps` | `rebar.lock` committed, active profiles |
-| `security` | `erl_crash.dump` and `.env` presence vs `.gitignore` (a whole line, so `.envrc` does not count), and a literal `-setcookie` in `config/vm.args(.src)` |
+| `security` | `erl_crash.dump` and `.env` presence vs `.gitignore` (asked of `git check-ignore` in a git repository; otherwise a whole `.gitignore` line, so `.envrc` does not count), and a literal `-setcookie` in `config/vm.args(.src)` |
 | `build` | `_build/default` and app `ebin` exist |
 
 **Options:**
