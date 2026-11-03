@@ -90,9 +90,10 @@ $ rebar3 nova gen_resource --name products
 ===>         {"/products/:id", fun myapp_products_controller:show/1, #{methods => [get]}}
 ===>     ]},
 ===>   #{prefix => "",
-===>     %% Placeholders: replace require_bearer/1 with your security function
-===>     %% and myapp_body_limit with a plugin that refuses large bodies. Until
-===>     %% both exist, these routes fail closed.
+===>     %% Placeholders: `rebar3 nova gen_auth` generates require_bearer/1 and
+===>     %% myapp_body_limit; otherwise use your own security function and a
+===>     %% plugin that refuses large bodies. Until both exist, these routes
+===>     %% fail closed.
 ===>     security => fun myapp_auth_security:require_bearer/1,
 ===>     %% Plugins run before security, so the group sets its own instead of
 ===>     %% inheriting a global body decoder that reads any size of body.
@@ -108,7 +109,7 @@ $ rebar3 nova gen_resource --name products
 ===>     ]}
 ```
 
-Create, update and delete come in a group of their own behind a `security` function, so pasting the snippet does not make the writes public. Until you replace the placeholders with your own security function and body limit plugin, those routes fail closed. The group lists its own plugins, because Nova runs pre-request plugins before security: an inherited global body decoder would read a body of any size from a request without a token. A group's plugins replace the global ones, so `nova_json_schemas` is listed again when a route has a `json_schema`.
+Create, update and delete come in a group of their own behind a `security` function, so pasting the snippet does not make the writes public. Until you run `gen_auth` or replace the placeholders with your own security function and body limit plugin, those routes fail closed. The group lists its own plugins, because Nova runs pre-request plugins before security: an inherited global body decoder would read a body of any size from a request without a token. A group's plugins replace the global ones, so `nova_json_schemas` is listed again when a route has a `json_schema`.
 
 **Options:** Same as `gen_controller`.
 
@@ -130,6 +131,34 @@ $ rebar3 nova gen_test --name users
 | `--name`, `-n` | yes | — | Resource name |
 
 The paths, prefixes included, come from the compiled routes; with no routes for the controller yet, the suite assumes the `gen_resource` routes under `/{name}`. The generated suite starts `inets` and the application in `init_per_suite`, reads the port from the `nova` `cowboy_configuration` it runs with, uses `1` for path bindings and sends `{"name": "test"}` as the body, so it passes against the generated controller. Adapt the expectations as you implement the actions.
+
+### `nova gen_auth` - Generate token authentication
+
+Scaffolds email/password authentication with bearer tokens on [nova_auth](https://hex.pm/packages/nova_auth) 0.3 and Kura:
+
+- `src/myapp_auth.erl`: the `nova_auth` config module
+- `src/schemas/myapp_user.erl`, `src/schemas/myapp_user_token.erl`: Kura schemas; the `rebar3_kura` compile hook writes the migration
+- `src/myapp_accounts.erl`: register, authenticate, issue and revoke tokens
+- `src/myapp_auth_security.erl`: `require_bearer/1` for route groups
+- `src/myapp_login_limit.erl`: the rate-limit key and the per-email login limit
+- `src/controllers/myapp_auth_controller.erl`: `register/1`, `login/1`, `logout/1`, `me/1`
+- `src/plugins/myapp_body_limit.erl`: refuses request bodies over `max_bytes` (default 65536) before they are read
+- `test/myapp_auth_SUITE.erl`
+
+```
+$ rebar3 nova gen_auth
+```
+
+It then prints the deps (`{nova_auth, "~> 0.3"}`, `kura`, `kura_postgres`), the `rebar3_kura` hook and the routes to add. The project needs a Kura repo named `myapp_repo`, as `rebar3 nova new --kura` creates. Run the migrations with `kura_migrator:migrate(myapp_repo)` as a release step, not at boot.
+
+- The user schema is a starting point: `registration_changeset/2` (used by `nova_auth_accounts:register/2`) requires an email and a password, stores the email normalised (NFC, lowercased) behind a unique index and needs at least 12 characters of password; `password_changeset/2` is used by `change_password/4`. Passwords are hashed with `nova_auth_password` and dropped from the changeset's changes and params, valid or not, so they do not reach a log in `{error, Changeset}`. Add your own rules on top.
+- The token schema has `family_id`, `used_at` and the indexes nova_auth documents.
+- The public route group runs `nova_auth_rate_limit`, then `myapp_body_limit`, then `nova_request_plugin`, so a flood or an oversized body (or a chunked one, which has no length up front) is refused with 429 or 413 before anything reads it. The bearer group sets `plugins => []`: Nova runs pre-request plugins before security, so a global body-decoding plugin would read the body of a request that has no token at all. The instructions print a protected group for your own routes with `myapp_body_limit` before `nova_request_plugin`, for the same reason.
+- `require_bearer/1` reads the `Authorization` header bytewise (anything but a well-formed `Bearer <b64token>` is a 401, never a crash) and puts only the user's `id` and `email` in `auth_data`, never the password hash.
+- The rate limit keys on `nova_auth_rate_limit:client_ip/1` with IPv6 cut to its /64 (`myapp_login_limit:key/1`). Behind a reverse proxy, list the proxies as `{nova_auth, [{trusted_proxies, [...]}]}`.
+- `login/1` also allows 20 attempts per normalised email in 15 minutes, whatever the address, so rotating addresses does not buy unlimited guesses. The limit is generous so that failing logins in someone's name hardly locks them out.
+- Registration answers 422 for a taken email, which tells anyone which addresses have accounts. Put email confirmation in front of it if that matters.
+- The tokens are bearer tokens, so the printed instructions turn Nova's session cookie off with `{use_sessions, false}` in the app's env.
 
 ### `nova openapi` — Generate OpenAPI 3.0.3 spec
 
