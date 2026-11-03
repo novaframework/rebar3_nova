@@ -28,6 +28,7 @@
     vm_args_keep_the_cookie_out/1,
     compose_binds_postgres_to_loopback/1,
     dockerfile_runs_unprivileged/1,
+    erlydtl_plugin_is_pinned/1,
     gitignore_ignores_env/1,
     prod_database_uses_tls/1
 ]).
@@ -57,6 +58,7 @@ all() ->
         vm_args_keep_the_cookie_out,
         compose_binds_postgres_to_loopback,
         dockerfile_runs_unprivileged,
+        erlydtl_plugin_is_pinned,
         gitignore_ignores_env,
         prod_database_uses_tls
     ].
@@ -535,6 +537,24 @@ dockerfile_runs_unprivileged(_Config) ->
     Ignored = string:split(read_file(Name, ".dockerignore"), "\n", all),
     [?assert(lists:member(Entry, Ignored), Entry) || Entry <- ["_build", ".git", ".env"]].
 
+erlydtl_plugin_is_pinned(_Config) ->
+    Name = "testapp_erlydtl_pin",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    {ok, Template} = file:consult(filename:join(templates_dir(), "nova/rebar.config")),
+    {ok, Lfe} = file:consult(filename:join(templates_dir(), "nova_lfe/rebar.config")),
+    [
+        ?assertMatch(
+            {rebar3_erlydtl_plugin, _,
+                {git, "https://github.com/erlydtl/rebar3_erlydtl_plugin.git", {ref, [_ | _]}}},
+            lists:keyfind(rebar3_erlydtl_plugin, 1, Plugins)
+        )
+     || Plugins <- [
+            prop(project_plugins, consult_rebar_config(Name)),
+            prop(project_plugins, Template),
+            prop(plugins, Lfe)
+        ]
+    ].
+
 gitignore_ignores_env(_Config) ->
     Name = "testapp_gitignore",
     rebar3_nova_new:generate_project(Name, default_flags()),
@@ -565,6 +585,7 @@ prod_database_uses_tls(_Config) ->
         end
      || Terms <- [Generated, Fullstack]
     ].
+
 
 template_sys_configs() ->
     [

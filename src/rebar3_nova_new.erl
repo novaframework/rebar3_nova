@@ -246,7 +246,8 @@ rebar_plugins(Flags) ->
             false ->
                 [
                     "    {rebar3_erlydtl_plugin, \".*\",\n",
-                    "        {git, \"https://github.com/erlydtl/rebar3_erlydtl_plugin.git\", {branch, \"master\"}}},\n"
+                    "        {git, \"https://github.com/erlydtl/rebar3_erlydtl_plugin.git\",\n",
+                    "            {ref, \"9d520e4775b12c796185f65b40f17773a3ff212b\"}}},\n"
                 ]
         end,
     LfePlugin =
