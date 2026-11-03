@@ -124,4 +124,9 @@ instructions(App) ->
         "nova_auth_accounts:change_identity/4, which resets confirmed_at.\n"
         "   The suite in test/APP_auth_SUITE.erl registers users in the database it runs "
         "against.\n",
-    lists:flatten(string:replace(Template, "APP", App, all)).
+    replace_app(Template, App).
+
+-spec replace_app(string(), string()) -> string().
+replace_app("APP" ++ Rest, App) -> App ++ replace_app(Rest, App);
+replace_app([C | Rest], App) -> [C | replace_app(Rest, App)];
+replace_app([], _App) -> [].

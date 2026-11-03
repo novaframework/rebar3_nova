@@ -443,15 +443,14 @@ cookie_findings(Dir) ->
     ].
 
 has_literal_cookie(VmArgs) ->
-    lists:any(
-        fun(Line) ->
-            case string:lexemes(Line, " \t\r") of
-                [~"-setcookie", Cookie | _] -> string:find(Cookie, ~"${") =:= nomatch;
-                _ -> false
-            end
-        end,
-        binary:split(VmArgs, ~"\n", [global])
-    ).
+    [Line || Line <- binary:split(VmArgs, ~"\n", [global]), is_literal_cookie(Line)] =/= [].
+
+-spec is_literal_cookie(binary()) -> boolean().
+is_literal_cookie(Line) ->
+    case string:lexemes(Line, [$\s, $\t, $\r]) of
+        [~"-setcookie", Cookie | _] -> string:find(Cookie, ~"${") =:= nomatch;
+        _ -> false
+    end.
 
 check_build(State) ->
     Dir = rebar3_nova_utils:get_app_dir(State),

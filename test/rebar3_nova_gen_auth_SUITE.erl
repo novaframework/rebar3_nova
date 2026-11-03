@@ -55,9 +55,8 @@ groups() ->
 
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(seki),
-    Dir = ?config(priv_dir, Config),
     _ = [
-        compile_source(Dir, Name, rebar3_nova_gen_auth:render(Template, ?APP))
+        compile_source(Config, Name, rebar3_nova_gen_auth:render(Template, ?APP))
      || {Template, Name} <- [
             {"user.erl.src", "blog_user"},
             {"auth_security.erl.src", "blog_auth_security"},
@@ -66,7 +65,7 @@ init_per_suite(Config) ->
             {"auth_controller.erl.src", "blog_auth_controller"}
         ]
     ],
-    compile_source(Dir, "blog_accounts", accounts_stub()),
+    compile_source(Config, "blog_accounts", accounts_stub()),
     Config.
 
 end_per_suite(_Config) ->
@@ -89,7 +88,9 @@ init_per_group(_Group, Config) ->
     Config.
 
 end_per_group(served, Config) ->
-    _ = [application:stop(App) || App <- lists:reverse(?config(started, Config))],
+    {started, Started} = lists:keyfind(started, 1, Config),
+    true = is_list(Started),
+    _ = [application:stop(App) || App <- lists:reverse(Started), is_atom(App)],
     [
         application:unset_env(nova, Key)
      || Key <- [bootstrap_application, environment, cowboy_configuration, plugins]
@@ -253,10 +254,9 @@ ipv6_addresses_share_a_bucket_per_64(_Config) ->
 %% The route groups from step 4 of the printed instructions.
 printed_routes() ->
     Text = rebar3_nova_gen_auth:instructions(?APP),
-    [_, AfterHeading] = string:split(Text, "4. Add the routes."),
-    [_, FromGroups] = string:split(AfterHeading, "     #{"),
-    [Groups, _] = string:split(FromGroups, "\n\n5."),
-    {ok, Tokens, _} = erl_scan:string("[#{" ++ Groups ++ "]."),
+    Start = string:str(Text, "     #{prefix"),
+    Groups = string:substr(Text, Start, string:str(Text, "\n\n5.") - Start),
+    {ok, Tokens, _} = erl_scan:string("[" ++ Groups ++ "]."),
     {ok, [Expr]} = erl_parse:parse_exprs(Tokens),
     {value, Routes, _} = erl_eval:expr(Expr, []),
     Routes.
@@ -336,9 +336,10 @@ raw(Source, Request) ->
     <<"HTTP/1.1 ", Status:3/binary, _/binary>> = Response,
     binary_to_integer(Status).
 
-compile_source(Dir, Name, Source) ->
-    File = filename:join(Dir, Name ++ ".erl"),
+compile_source(Config, Name, Source) ->
+    File = ?config(priv_dir, Config) ++ "/" ++ Name ++ ".erl",
     ok = file:write_file(File, Source),
     {ok, Module, Binary} = compile:file(File, [binary, return_errors]),
+    true = is_atom(Module) andalso is_binary(Binary),
     {module, Module} = code:load_binary(Module, File, Binary),
     Module.

@@ -40,17 +40,15 @@ do(State) ->
     Config =
         case proplists:get_value(config, Args) of
             undefined -> rebar3_nova_utils:load_sys_config(State);
-            Path -> consult_config(Path)
+            Path -> consult_config(lists:flatten(io_lib:format("~ts", [Path])))
         end,
     rebar_paths:set_paths([deps, plugins], State),
-    Options = #{
-        env => proplists:get_value(env, Args, dev),
-        strict => proplists:get_value(strict, Args, false),
-        config => Config
-    },
-    case run(App, Options) of
-        ok -> {ok, State};
-        {error, Message} -> {error, Message}
+    case {proplists:get_value(env, Args, dev), proplists:get_value(strict, Args, false)} of
+        {Env, Strict} when is_atom(Env), is_boolean(Strict) ->
+            case run(App, #{env => Env, strict => Strict, config => Config}) of
+                ok -> {ok, State};
+                {error, Message} -> {error, Message}
+            end
     end.
 
 -doc """
@@ -89,16 +87,13 @@ audit(App, Env, Config) ->
         is_list(Env1),
         {router_module, Router} <- Env1
     ],
-    Previous = application:get_env(nova, environment),
+    Previous = nova:get_environment(),
     application:set_env(nova, environment, Env),
     Dispatch =
         try
             rebar3_nova_utils:compile_app_routes(Apps)
         after
-            case Previous of
-                {ok, Value} -> application:set_env(nova, environment, Value);
-                undefined -> application:unset_env(nova, environment)
-            end
+            application:set_env(nova, environment, Previous)
         end,
     ok = rebar3_nova_dispatch:warn_unknown(Dispatch),
     {Warnings, Infos} = classify_findings(collect_routes(Dispatch)),
@@ -158,9 +153,10 @@ declared_nova_apps(Name, Config) ->
 app_name({App, _Options}) -> App;
 app_name(App) -> App.
 
+-spec consult_config(string()) -> [{atom(), term()}].
 consult_config(Path) ->
     case file:consult(Path) of
-        {ok, [Config]} when is_list(Config) -> Config;
+        {ok, [Config]} when is_list(Config) -> [{App, Env} || {App, Env} <- Config, is_atom(App)];
         {error, Reason} -> rebar_api:abort("Could not read ~s: ~p", [Path, Reason])
     end.
 

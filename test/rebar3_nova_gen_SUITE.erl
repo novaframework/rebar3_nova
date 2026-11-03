@@ -335,7 +335,7 @@ assert_formatted(Source) ->
     {ok, Formatted, _Warnings} = erlfmt:format_string(Text, []),
     ?assertEqual(Text, Formatted).
 
--spec eval_hint(string()) -> term().
+-spec eval_hint(string()) -> dynamic().
 eval_hint(Expression) ->
     {ok, Tokens, _} = erl_scan:string(Expression ++ "."),
     {ok, [Expr]} = erl_parse:parse_exprs(Tokens),

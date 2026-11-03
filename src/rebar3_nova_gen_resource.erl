@@ -105,7 +105,7 @@ route_hints(AppName, Name, Actions) ->
                 route_group(Security, Writes)
              || Writes <- [Routes([create, update, delete])], Writes =/= []
             ],
-    lists:flatten(lists:join(",\n", Groups)).
+    lists:flatten(io_lib:format("~ts", [lists:join(",\n", Groups)])).
 
 route_group(Security, Routes) ->
     [
