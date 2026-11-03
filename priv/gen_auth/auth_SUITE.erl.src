@@ -31,21 +31,29 @@ all() ->
         bearer_routes_do_not_read_an_unauthenticated_body
     ].
 
+%% The suite connects from 127.0.0.1 and trusts it as a proxy, so each test
+%% names its own client in x-forwarded-for and the rate limits never carry
+%% over between tests or runs.
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(inets),
     {ok, _} = application:ensure_all_started({{app}}),
-    Config.
+    {ok, _} = kura_migrator:migrate({{app}}_repo),
+    Proxies = application:get_env(nova_auth, trusted_proxies),
+    ok = application:set_env(nova_auth, trusted_proxies, [{127, 0, 0, 1}]),
+    [{trusted_proxies, Proxies} | Config].
 
-end_per_suite(_Config) ->
+end_per_suite(Config) ->
+    case ?config(trusted_proxies, Config) of
+        {ok, Proxies} -> application:set_env(nova_auth, trusted_proxies, Proxies);
+        undefined -> application:unset_env(nova_auth, trusted_proxies)
+    end,
     ok = application:stop({{app}}).
 
-%% Each test sends from its own loopback address, 127.0.N.1, so the rate
-%% limits of one test do not reach another and the suite can run again at
-%% once. Linux routes all of 127.0.0.0/8 to loopback; macOS needs each
-%% address added with ifconfig lo0 alias.
-init_per_testcase(TestCase, Config) ->
-    {Before, _} = lists:splitwith(fun(Case) -> Case =/= TestCase end, all()),
-    [{source, {127, 0, length(Before) + 1, 1}} | Config].
+%% A random /64 in the IPv6 documentation range; the limits count per /64.
+init_per_testcase(_TestCase, Config) ->
+    Prefix = [rand:uniform(65536) - 1 || _ <- [1, 2]],
+    Client = list_to_tuple([16#2001, 16#db8 | Prefix] ++ [0, 0, 0, 1]),
+    [{client, inet:ntoa(Client)} | Config].
 
 end_per_testcase(_TestCase, _Config) ->
     ok.
@@ -53,7 +61,8 @@ end_per_testcase(_TestCase, _Config) ->
 register_login_and_logout(Config) ->
     Email = unique_email(),
     {201, #{~"email" := Email}} = post(Config, "/api/users", registration(Email, password())),
-    {201, Headers, #{~"token" := Token}} = send(Config, post, login_request(Email, password())),
+    {201, Headers, #{~"token" := Token}} =
+        send(post, login_request(Config, Email, password())),
     ?assertEqual("no-store", proplists:get_value("cache-control", Headers)),
     ?assertMatch({200, #{~"email" := Email}}, request(Config, get, "/api/me", Token)),
     ?assertMatch({204, _}, request(Config, delete, "/api/tokens", Token)),
@@ -81,25 +90,23 @@ me_needs_a_token(Config) ->
     ?assertMatch({401, _}, request(Config, get, "/api/me", ~"invalid")).
 
 me_needs_an_authorization_header(Config) ->
-    ?assertMatch({401, _, _}, send(Config, get, {url("/api/me"), headers()})).
+    ?assertMatch({401, _, _}, send(get, {url("/api/me"), headers(Config)})).
 
 large_body_is_refused(Config) ->
     Body = binary:copy(~"a", 65537),
     ?assertMatch(
-        {413, _, _}, send(Config, post, {url("/api/users"), headers(), "application/json", Body})
+        {413, _, _}, send(post, {url("/api/users"), headers(Config), "application/json", Body})
     ).
 
 %% A fresh email each time, so only the per-address limit applies.
 logins_from_one_address_are_limited(Config) ->
     Statuses = [status(login(Config, unique_email(), ~"guess")) || _ <- lists:seq(1, 11)],
-    ?assert(lists:member(429, Statuses), Statuses).
+    ?assertEqual(lists:duplicate(10, 401) ++ [429], Statuses).
 
-%% The per-email limit answers the 6th attempt; when the suite runs again
-%% within a minute, the per-address limit answers sooner.
 logins_for_one_email_are_limited(Config) ->
     Email = unique_email(),
     Statuses = [status(login(Config, Email, ~"guess")) || _ <- lists:seq(1, 6)],
-    ?assertEqual(429, lists:last(Statuses), Statuses).
+    ?assertEqual(lists:duplicate(5, 401) ++ [429], Statuses).
 
 %% Nova's nova_request_plugin refuses a body over 1 MB with 413 before
 %% reading it. Here security must answer first: a bearer group that
@@ -109,7 +116,7 @@ bearer_routes_do_not_read_an_unauthenticated_body(Config) ->
     Body = binary:copy(~"a", 1000001),
     ?assertMatch(
         {401, _, _},
-        send(Config, delete, {url("/api/tokens"), headers(), "application/json", Body})
+        send(delete, {url("/api/tokens"), headers(Config), "application/json", Body})
     ).
 
 %% The users stay in the database, so each run needs fresh addresses.
@@ -125,27 +132,25 @@ registration(Email, Password) ->
     #{email => Email, password => Password}.
 
 login(Config, Email, Password) ->
-    without_headers(send(Config, post, login_request(Email, Password))).
+    without_headers(send(post, login_request(Config, Email, Password))).
 
-login_request(Email, Password) ->
+login_request(Config, Email, Password) ->
     Body = json:encode(#{email => Email, password => Password}),
-    {url("/api/tokens"), headers(), "application/json", Body}.
+    {url("/api/tokens"), headers(Config), "application/json", Body}.
 
 post(Config, Path, Body) ->
-    Request = {url(Path), headers(), "application/json", json:encode(Body)},
-    without_headers(send(Config, post, Request)).
+    Request = {url(Path), headers(Config), "application/json", json:encode(Body)},
+    without_headers(send(post, Request)).
 
 request(Config, Method, Path, Token) ->
-    Headers = [{"authorization", "Bearer " ++ binary_to_list(Token)} | headers()],
-    without_headers(send(Config, Method, {url(Path), Headers})).
+    Headers = [{"authorization", "Bearer " ++ binary_to_list(Token)} | headers(Config)],
+    without_headers(send(Method, {url(Path), Headers})).
 
-%% A new connection per request, so each one leaves from the test's address.
-headers() ->
-    [{"connection", "close"}].
+headers(Config) ->
+    [{"x-forwarded-for", ?config(client, Config)}].
 
-send(Config, Method, Request) ->
-    Options = [{body_format, binary}, {socket_opts, [{ip, ?config(source, Config)}]}],
-    response(httpc:request(Method, Request, [], Options)).
+send(Method, Request) ->
+    response(httpc:request(Method, Request, [], [{body_format, binary}])).
 
 response({ok, {{_, Status, _}, Headers, Body}}) ->
     case proplists:get_value("content-type", Headers) of
