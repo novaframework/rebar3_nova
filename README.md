@@ -8,21 +8,48 @@ A rebar plugin for nova
 
 ## Installation
 
-Add the plugin to your rebar config (`~/.config/rebar3/rebar.config`):
+Add the plugin from Hex to your global rebar config (`~/.config/rebar3/rebar.config`):
+
+    {plugins, [
+        {rebar3_nova, "~> 0.13"}
+    ]}.
+
+Or run the installer, which adds the same line and keeps the rest of the file as it is:
+
+    $ bash -c "$(curl -fsSL https://raw.githubusercontent.com/novaframework/rebar3_nova/master/install.sh)"
+
+To track unreleased changes, use the git source instead:
 
     {plugins, [
         {rebar3_nova, {git, "https://github.com/novaframework/rebar3_nova.git", {branch, "master"}}}
     ]}.
-
-For latest stable from hex:
-
-    {plugins, [rebar3_nova]}.
 
 Then just call your plugin directly in an existing application:
 
     $ rebar3 nova
     ===> Fetching rebar3_nova
     ===> Compiling rebar3_nova
+
+## Creating a project
+
+    $ rebar3 new nova my_app            # Nova + ErlyDTL views
+    $ rebar3 new nova_fullstack my_app  # Nova + Arizona live views + Kura/PostgreSQL
+
+`rebar3 nova new` builds the same base project and adds parts with flags:
+
+    $ rebar3 nova new my_app --kura --arizona --docker
+
+| Flag | Adds |
+|------|------|
+| `--kura` | `kura` + `kura_postgres`, a repo module, the `{kura, compile}` migration hook, a `{kura, [{repos, ...}]}` config and a `docker-compose.yml` with PostgreSQL. Migrations run when the application starts. |
+| `--pgo` | `pgo` with a `{pgo, [{pools, ...}]}` config (not together with `--kura`) |
+| `--arizona` | `arizona_nova`, a live page at `/` with a layout, and the `arizona_nova` routes and middleware chain in the configs. Arizona needs OTP 29. |
+| `--otel` | OpenTelemetry deps and `opentelemetry_nova:setup()` at start |
+| `--lfe` | LFE sources instead of Erlang |
+| `--ci` | A GitHub Actions workflow |
+| `--docker` | A multi-stage `Dockerfile` (OTP 29 builder, Debian trixie runtime) |
+
+Generated projects target OTP 29 and rebar3 3.27 (`.tool-versions`), depend on `{nova, "~> 0.18"}` and list `{rebar3_nova, "~> 0.13"}` as a project plugin.
 
 ## Commands
 

@@ -43,6 +43,7 @@ rebar3 nova release          # Build release (regenerates OpenAPI if schemas exi
 
 ## Templates
 - `priv/templates/nova/` — Erlang project scaffold
+- `priv/templates/nova_fullstack/` - Nova + Arizona + Kura scaffold
 - `priv/templates/nova_lfe/` — LFE project scaffold
 - `priv/templates/nova_plugin.template` — plugin module
 - `priv/templates/nova_websocket.template` — WebSocket module
