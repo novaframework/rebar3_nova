@@ -106,12 +106,16 @@ resource_write_hints_are_behind_security(_Config) ->
     ),
     ?assert(maps:is_key(security, OnlyWrites)).
 
-%% The hints must not send anyone to gen_auth for modules it does not make.
+%% The placeholders are the modules gen_auth generates.
 resource_write_hints_name_their_placeholders(_Config) ->
     Hints = rebar3_nova_gen_resource:route_hints(blog, "tags", ?ACTIONS),
-    ?assertEqual(nomatch, string:find(Hints, "gen_auth")),
-    ?assertNotEqual(nomatch, string:find(Hints, "Placeholders: replace require_bearer/1")),
-    ?assertNotEqual(nomatch, string:find(Hints, "fail closed")).
+    ?assertNotEqual(
+        nomatch, string:find(Hints, "`rebar3 nova gen_auth` generates require_bearer/1")
+    ),
+    ?assertNotEqual(nomatch, string:find(Hints, "fail closed")),
+    Files = [Path || {_, Path} <- rebar3_nova_gen_auth:files("blog")],
+    ?assert(lists:member("src/blog_auth_security.erl", Files)),
+    ?assert(lists:member("src/plugins/blog_body_limit.erl", Files)).
 
 %% A group's own plugins replace the global ones; without them the write
 %% group inherits a body decoder that runs before security.

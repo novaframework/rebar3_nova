@@ -97,9 +97,10 @@ route_hints(AppName, Name, Actions) ->
     end,
     Writes = Routes([create, update, delete]),
     Protected = io_lib:format(
-        "  %% Placeholders: replace require_bearer/1 with your security function\n"
-        "  %% and ~s_body_limit with a plugin that refuses large bodies. Until\n"
-        "  %% both exist, these routes fail closed.\n"
+        "  %% Placeholders: `rebar3 nova gen_auth` generates require_bearer/1 and\n"
+        "  %% ~s_body_limit; otherwise use your own security function and a\n"
+        "  %% plugin that refuses large bodies. Until both exist, these routes\n"
+        "  %% fail closed.\n"
         "  security => fun ~s_auth_security:require_bearer/1,\n"
         "  %% Plugins run before security, so the group sets its own instead of\n"
         "  %% inheriting a global body decoder that reads any size of body.\n"
