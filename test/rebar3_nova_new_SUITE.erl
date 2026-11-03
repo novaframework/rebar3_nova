@@ -575,7 +575,7 @@ prod_database_uses_tls(_Config) ->
     Name = "testapp_dbtls",
     rebar3_nova_new:generate_project(Name, (default_flags())#{kura => true}),
     {ok, [Generated]} = consult_env_substituted(
-        filename:join([Name, "config", "prod_sys.config.src"])
+        Name ++ "/config/prod_sys.config.src"
     ),
     Fullstack = render_template_config("nova_fullstack/prod_sys.config.src"),
     [

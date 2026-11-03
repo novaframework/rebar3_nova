@@ -57,7 +57,7 @@ format_error(Reason) ->
 The project name: `--name`, else the first positional argument, which rebar3
 hands a namespaced provider as the `task` option rather than in `Args`.
 """.
--spec resolve_name([{atom(), term()}], [string()]) -> string().
+-spec resolve_name([{atom(), dynamic()}], [string()]) -> dynamic().
 resolve_name(Opts, Args) ->
     case {proplists:get_value(name, Opts), proplists:get_value(task, Opts), Args} of
         {Name, _, _} when is_list(Name) -> Name;
@@ -883,6 +883,7 @@ sys_config_otel(_Env, _Flags) ->
 %% vm.args.src
 %%======================================================================
 
+-spec generate_vm_args(string()) -> ok.
 generate_vm_args(Name) ->
     Path = filename:join([Name, "config", "vm.args.src"]),
     PrivDir =
@@ -890,7 +891,11 @@ generate_vm_args(Name) ->
             Dir when is_list(Dir) -> Dir
         end,
     {ok, Source} = file:read_file(filename:join([PrivDir, "templates", "nova", "vm.args.src"])),
-    Content = binary:replace(Source, ~"{{name}}", unicode:characters_to_binary(Name), [global]),
+    NameBin =
+        case unicode:characters_to_binary(Name) of
+            Bin when is_binary(Bin) -> Bin
+        end,
+    Content = binary:replace(Source, ~"{{name}}", NameBin, [global]),
     rebar3_nova_utils:write_file(Path, Content).
 
 %%======================================================================
@@ -1153,6 +1158,7 @@ maybe_generate_ci(_Name, _Flags) ->
 %% maybe_generate_docker
 %%======================================================================
 
+-spec maybe_generate_docker(string(), #{docker := boolean(), _ => _}) -> ok.
 maybe_generate_docker(Name, #{docker := true}) ->
     Path = filename:join(Name, "Dockerfile"),
     Content = [
@@ -1181,7 +1187,7 @@ maybe_generate_docker(Name, #{docker := true}) ->
         "\", \"foreground\"]\n"
     ],
     rebar3_nova_utils:write_file(Path, Content),
-    rebar3_nova_utils:write_file(filename:join(Name, ".dockerignore"), [
+    rebar3_nova_utils:write_file(Name ++ "/.dockerignore", [
         "_build\n",
         "_checkouts\n",
         ".git\n",
