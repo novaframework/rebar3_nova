@@ -3,7 +3,7 @@
 -export([init/1, do/1, format_error/1]).
 
 %% Exported for rebar3_nova_gen_SUITE.
--export([files/1, render/2]).
+-export([files/1, render/2, instructions/1]).
 
 -define(PROVIDER, gen_auth).
 -define(DEPS, [{default, compile}]).
@@ -69,37 +69,48 @@ priv_dir() ->
     end.
 
 print_instructions(App) ->
-    rebar_api:info(
-        "~nAuthentication files generated. Next steps:~n~n"
-        "1. Add the deps to rebar.config and to the applications list in ~s.app.src:~n"
-        "     {nova_auth, \"~~> 0.2\"}, {kura, \"~~> 2.25\"}, {kura_postgres, \"~~> 1.1\"}~n"
-        "   ~s_auth expects a Kura repo module named ~s_repo, as `rebar3 nova new --kura` "
-        "generates.~n~n"
-        "2. Let rebar3_kura write the users and user_tokens migrations from the schemas:~n"
-        "     {project_plugins, [{rebar3_kura, \"~~> 0.16\"}]}.~n"
-        "     {provider_hooks, [{pre, [{compile, {kura, compile}}]}]}.~n"
-        "   then run them, for example with kura_migrator:migrate(~s_repo) at boot.~n~n"
-        "3. Add the routes. ~s_rate_limit limits login and registration to 10 requests a "
-        "minute per client IP; behind a proxy, change its client_ip/1.~n"
-        "     #{prefix => \"/api\",~n"
-        "       plugins => [~n"
-        "           {pre_request, nova_request_plugin, #{decode_json_body => true}},~n"
-        "           {pre_request, ~s_rate_limit, #{}}~n"
-        "       ],~n"
-        "       routes => [~n"
-        "           {\"/users\", fun ~s_auth_controller:register/1, #{methods => [post]}},~n"
-        "           {\"/tokens\", fun ~s_auth_controller:login/1, #{methods => [post]}}~n"
-        "       ]},~n"
-        "     #{prefix => \"/api\",~n"
-        "       security => fun ~s_auth_security:require_bearer/1,~n"
-        "       plugins => [{pre_request, nova_request_plugin, #{decode_json_body => true}}],~n"
-        "       routes => [~n"
-        "           {\"/tokens\", fun ~s_auth_controller:logout/1, #{methods => [delete]}},~n"
-        "           {\"/me\", fun ~s_auth_controller:me/1, #{methods => [get]}}~n"
-        "       ]}~n~n"
-        "4. Protect your own API routes with security => fun ~s_auth_security:require_bearer/1; "
-        "the user is in the request under auth_data.~n"
-        "   The suite in test/~s_auth_SUITE.erl registers users in the database it runs "
-        "against.~n",
-        lists:duplicate(13, App)
+    rebar_api:info("~ts", [instructions(App)]).
+
+-doc "The next steps printed after generating, for the application `App`.".
+-spec instructions(string()) -> string().
+instructions(App) ->
+    lists:flatten(
+        io_lib:format(
+            "~nAuthentication files generated. Next steps:~n~n"
+            "1. Add the deps to rebar.config and to the applications list in ~s.app.src:~n"
+            "     {nova_auth, \"~~> 0.2.0\"}, {kura, \"~~> 2.25\"}, {kura_postgres, \"~~> 1.1\"}~n"
+            "   Keep nova_auth on 0.2.x: the generated rate-limit plugin sets the key_fun "
+            "option, which later versions reject.~n"
+            "   ~s_auth expects a Kura repo module named ~s_repo, as `rebar3 nova new --kura` "
+            "generates.~n~n"
+            "2. Let rebar3_kura write the users and user_tokens migrations from the schemas:~n"
+            "     {project_plugins, [{rebar3_kura, \"~~> 0.16\"}]}.~n"
+            "     {provider_hooks, [{pre, [{compile, {kura, compile}}]}]}.~n"
+            "   then run them, for example with kura_migrator:migrate(~s_repo) at boot.~n~n"
+            "3. Add the routes. ~s_rate_limit limits login and registration to 10 requests a "
+            "minute per client IP, and runs before the body is decoded. It keys on the TCP "
+            "peer, which is the client only when the node is exposed directly; behind a "
+            "reverse proxy, switch to the trusted-proxy client_ip/1 in it.~n"
+            "     #{prefix => \"/api\",~n"
+            "       plugins => [~n"
+            "           {pre_request, ~s_rate_limit, #{}},~n"
+            "           {pre_request, nova_request_plugin, #{decode_json_body => true}}~n"
+            "       ],~n"
+            "       routes => [~n"
+            "           {\"/users\", fun ~s_auth_controller:register/1, #{methods => [post]}},~n"
+            "           {\"/tokens\", fun ~s_auth_controller:login/1, #{methods => [post]}}~n"
+            "       ]},~n"
+            "     #{prefix => \"/api\",~n"
+            "       security => fun ~s_auth_security:require_bearer/1,~n"
+            "       plugins => [{pre_request, nova_request_plugin, #{decode_json_body => true}}],~n"
+            "       routes => [~n"
+            "           {\"/tokens\", fun ~s_auth_controller:logout/1, #{methods => [delete]}},~n"
+            "           {\"/me\", fun ~s_auth_controller:me/1, #{methods => [get]}}~n"
+            "       ]}~n~n"
+            "4. Protect your own API routes with security => fun ~s_auth_security:require_bearer/1; "
+            "the user is in the request under auth_data.~n"
+            "   The suite in test/~s_auth_SUITE.erl registers users in the database it runs "
+            "against.~n",
+            lists:duplicate(13, App)
+        )
     ).

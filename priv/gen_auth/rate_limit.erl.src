@@ -32,8 +32,39 @@ options() ->
         key_fun => fun ?MODULE:client_ip/1
     }.
 
-%% Behind a proxy every request has the proxy's address; key on the
-%% client address the proxy forwards instead.
+%% Keys on the TCP peer, which is the client only when the node is exposed
+%% directly. Behind a reverse proxy every request has the proxy's address, so
+%% all clients share one bucket and a few requests lock everyone out of login.
+%% Then replace client_ip/1 with the variant below and list the proxies in
+%% {{app}}'s env, e.g. {trusted_proxies, [{10, 0, 0, 2}]} in sys.config.
 client_ip(Req) ->
     {IP, _Port} = cowboy_req:peer(Req),
     IP.
+
+%% Trusts x-forwarded-for only from a trusted proxy, and takes its right-most
+%% address that is not a trusted proxy: the entries left of that one were
+%% written by the client and can be anything.
+%%
+%% client_ip(Req) ->
+%%     {Peer, _Port} = cowboy_req:peer(Req),
+%%     Trusted = application:get_env({{app}}, trusted_proxies, []),
+%%     case lists:member(Peer, Trusted) of
+%%         true ->
+%%             Hops = binary:split(cowboy_req:header(~"x-forwarded-for", Req, ~""), ~",", [global]),
+%%             forwarded_client(lists:reverse(Hops), Peer, Trusted);
+%%         false ->
+%%             Peer
+%%     end.
+%%
+%% forwarded_client([], Peer, _Trusted) ->
+%%     Peer;
+%% forwarded_client([Hop | Hops], Peer, Trusted) ->
+%%     case inet:parse_strict_address(binary_to_list(string:trim(Hop))) of
+%%         {ok, IP} ->
+%%             case lists:member(IP, Trusted) of
+%%                 true -> forwarded_client(Hops, Peer, Trusted);
+%%                 false -> IP
+%%             end;
+%%         {error, einval} ->
+%%             Peer
+%%     end.

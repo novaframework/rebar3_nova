@@ -128,7 +128,9 @@ Scaffolds email/password authentication with bearer tokens on [nova_auth](https:
 $ rebar3 nova gen_auth
 ```
 
-It then prints the deps (`nova_auth`, `kura`, `kura_postgres`), the `rebar3_kura` hook and the routes to add. The project needs a Kura repo named `myapp_repo`, as `rebar3 nova new --kura` creates.
+It then prints the deps (`nova_auth`, `kura`, `kura_postgres`), the `rebar3_kura` hook and the routes to add. The project needs a Kura repo named `myapp_repo`, as `rebar3 nova new --kura` creates. Pin `{nova_auth, "~> 0.2.0"}`: the rate-limit plugin sets nova_auth 0.2's `key_fun` option, which later versions reject.
+
+- Put the rate limiter before `nova_request_plugin`, as the printed routes do, so a flood is refused before its body is decoded. It keys on the TCP peer, which is the client only when the node is exposed directly. Behind a reverse proxy every client shares the proxy's address and one bucket: switch to the commented-out `client_ip/1` in the plugin, which reads `x-forwarded-for` only from the proxies in `{trusted_proxies, [...]}` in the app env and takes the right-most address that is not one of them.
 
 ### `nova openapi` — Generate OpenAPI 3.0.3 spec
 

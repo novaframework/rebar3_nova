@@ -17,7 +17,12 @@
     auth_files_are_valid_formatted_erlang/1,
     auth_uses_nova_auth_not_bcrypt_or_thoas/1,
     auth_writes_no_migration/1,
-    auth_names_follow_the_app/1
+    auth_names_follow_the_app/1,
+    auth_instructions_pin_nova_auth_to_0_2/1,
+    auth_rate_limit_runs_before_the_body_is_decoded/1,
+    auth_rate_limit_keys_on_the_peer/1,
+    auth_rate_limit_proxy_variant_is_formatted/1,
+    auth_rate_limit_proxy_variant_trusts_only_proxies/1
 ]).
 
 -define(ACTIONS, [list, show, create, update, delete]).
@@ -36,7 +41,12 @@ all() ->
         auth_files_are_valid_formatted_erlang,
         auth_uses_nova_auth_not_bcrypt_or_thoas,
         auth_writes_no_migration,
-        auth_names_follow_the_app
+        auth_names_follow_the_app,
+        auth_instructions_pin_nova_auth_to_0_2,
+        auth_rate_limit_runs_before_the_body_is_decoded,
+        auth_rate_limit_keys_on_the_peer,
+        auth_rate_limit_proxy_variant_is_formatted,
+        auth_rate_limit_proxy_variant_trusts_only_proxies
     ].
 
 init_per_suite(Config) ->
@@ -171,12 +181,76 @@ auth_names_follow_the_app(_Config) ->
      || {T, P} <- auth_files()
     ].
 
+auth_instructions_pin_nova_auth_to_0_2(_Config) ->
+    Text = rebar3_nova_gen_auth:instructions("blog"),
+    ?assertNotEqual(nomatch, string:find(Text, "{nova_auth, \"~> 0.2.0\"}")),
+    ?assertEqual(nomatch, string:find(Text, "{nova_auth, \"~> 0.2\"}")).
+
+%% A limiter after nova_request_plugin decodes every flood request's body
+%% before refusing it.
+auth_rate_limit_runs_before_the_body_is_decoded(_Config) ->
+    Text = rebar3_nova_gen_auth:instructions("blog"),
+    Limiter = string:str(Text, "{pre_request, blog_rate_limit, #{}}"),
+    Decoder = string:str(Text, "{pre_request, nova_request_plugin"),
+    ?assert(Limiter > 0),
+    ?assert(Limiter < Decoder).
+
+auth_rate_limit_keys_on_the_peer(Config) ->
+    Module = compile_source(Config, "blog_rate_limit", render_auth("rate_limit.erl.src")),
+    ?assertEqual({10, 0, 0, 2}, Module:client_ip(proxied_req({10, 0, 0, 2}, ~"203.0.113.7"))).
+
+auth_rate_limit_proxy_variant_is_formatted(_Config) ->
+    assert_formatted(proxy_variant(render_auth("rate_limit.erl.src"))).
+
+auth_rate_limit_proxy_variant_trusts_only_proxies(Config) ->
+    Module = compile_source(
+        Config, "blog_proxy_ip", proxy_variant(render_auth("rate_limit.erl.src"))
+    ),
+    Proxy = {10, 0, 0, 2},
+    Client = {203, 0, 113, 7},
+    application:set_env(blog, trusted_proxies, [Proxy, {10, 0, 0, 3}]),
+    try
+        ?assertEqual(Client, Module:client_ip(proxied_req(Client, ~"198.51.100.1"))),
+        ?assertEqual(Client, Module:client_ip(proxied_req(Proxy, ~"198.51.100.1, 203.0.113.7"))),
+        ?assertEqual(Client, Module:client_ip(proxied_req(Proxy, ~"203.0.113.7, 10.0.0.3"))),
+        ?assertEqual(
+            {16#2001, 16#db8, 0, 0, 0, 0, 0, 1},
+            Module:client_ip(proxied_req(Proxy, ~"2001:db8::1"))
+        ),
+        ?assertEqual(Proxy, Module:client_ip(proxied_req(Proxy, ~"10.0.0.3"))),
+        ?assertEqual(Proxy, Module:client_ip(proxied_req(Proxy, ~"203.0.113.7, not-an-ip"))),
+        ?assertEqual(Proxy, Module:client_ip(#{peer => {Proxy, 443}, headers => #{}}))
+    after
+        application:unset_env(blog, trusted_proxies)
+    end.
+
 %%====================================================================
 %% Helpers
 %%====================================================================
 
 auth_files() ->
     rebar3_nova_gen_auth:files("blog").
+
+render_auth(Template) ->
+    rebar3_nova_gen_auth:render(Template, "blog").
+
+%% The commented-out trusted-proxy client_ip/1 in the rate-limit plugin, as a
+%% module of its own.
+proxy_variant(Source) ->
+    Lines = string:split(Source, ~"\n", all),
+    {_, Variant} = lists:splitwith(fun(L) -> L =/= ~"%% client_ip(Req) ->" end, Lines),
+    Commented = lists:takewhile(fun(L) -> string:prefix(L, ~"%%") =/= nomatch end, Variant),
+    iolist_to_binary([
+        "-module(blog_proxy_ip).\n\n-export([client_ip/1]).\n\n",
+        lists:join("\n", [uncomment(L) || L <- Commented]),
+        "\n"
+    ]).
+
+uncomment(~"%%") -> ~"";
+uncomment(<<"%% ", Line/binary>>) -> Line.
+
+proxied_req(Peer, ForwardedFor) ->
+    #{peer => {Peer, 443}, headers => #{~"x-forwarded-for" => ForwardedFor}}.
 
 suite_source() ->
     rebar3_nova_gen_test:generate_content("gen_tags_controller_SUITE", blog, [
