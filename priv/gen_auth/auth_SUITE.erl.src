@@ -60,7 +60,9 @@ me_needs_a_token(_Config) ->
 
 %% The users stay in the database, so each run needs fresh addresses.
 unique_email() ->
-    <<"user-", (binary:encode_hex(crypto:strong_rand_bytes(8), lowercase))/binary, "@example.com">>.
+    iolist_to_binary([
+        ~"user-", binary:encode_hex(crypto:strong_rand_bytes(8), lowercase), ~"@example.com"
+    ]).
 
 password() ->
     ~"correct horse battery staple".

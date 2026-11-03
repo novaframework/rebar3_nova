@@ -50,7 +50,7 @@ rate_limit_key(Req) ->
 %% entries left of it were written by the client and can be anything.
 client_ip(Req) ->
     {Peer, _Port} = cowboy_req:peer(Req),
-    Trusted = application:get_env({{app}}, trusted_proxies, []),
+    Trusted = trusted_proxies(),
     case is_trusted(unmap(Peer), Trusted) of
         true ->
             Hops = binary:split(cowboy_req:header(~"x-forwarded-for", Req, ~""), ~",", [global]),
@@ -62,26 +62,109 @@ client_ip(Req) ->
 forwarded_client([], Peer, _Trusted) ->
     Peer;
 forwarded_client([Hop | Hops], Peer, Trusted) ->
-    case inet:parse_strict_address(string:trim(binary_to_list(Hop))) of
+    case hop_address(list_to_binary(string:trim(binary_to_list(Hop)))) of
+        empty ->
+            forwarded_client(Hops, Peer, Trusted);
         {ok, IP} ->
             case is_trusted(unmap(IP), Trusted) of
                 true -> forwarded_client(Hops, Peer, Trusted);
                 false -> unmap(IP)
             end;
-        {error, einval} ->
+        error ->
             Peer
     end.
 
-is_trusted(IP, Trusted) ->
-    lists:any(fun(Range) -> in_range(IP, Range) end, Trusted).
+%% An address, optionally with a port: 192.0.2.1:8080 or [2001:db8::1]:443.
+hop_address(<<>>) ->
+    empty;
+hop_address(<<"[", Rest/binary>>) ->
+    case binary:split(Rest, ~"]") of
+        [Address, <<>>] ->
+            parse_address(Address, fun inet:parse_ipv6strict_address/1);
+        [Address, <<":", Port/binary>>] ->
+            with_port(Address, Port, fun inet:parse_ipv6strict_address/1);
+        _ ->
+            error
+    end;
+hop_address(Hop) ->
+    case binary:split(Hop, ~":", [global]) of
+        [Address, Port] -> with_port(Address, Port, fun inet:parse_ipv4strict_address/1);
+        _ -> parse_address(Hop, fun inet:parse_strict_address/1)
+    end.
 
-in_range(IP, {Network, Length}) when is_tuple(Network), is_integer(Length) ->
+with_port(Address, Port, Parse) ->
+    case is_port_number(Port) of
+        true -> parse_address(Address, Parse);
+        false -> error
+    end.
+
+is_port_number(<<>>) -> false;
+is_port_number(Port) -> [C || <<C>> <= Port, C < $0 orelse C > $9] =:= [].
+
+parse_address(Address, Parse) ->
+    case Parse(binary_to_list(Address)) of
+        {ok, IP} -> {ok, IP};
+        {error, _} -> error
+    end.
+
+is_trusted(IP, Trusted) ->
     Bits = address_bits(IP),
-    NetworkBits = address_bits(unmap(Network)),
-    bit_size(Bits) =:= bit_size(NetworkBits) andalso Length =< bit_size(Bits) andalso
-        prefix(Bits, Length) =:= prefix(NetworkBits, Length);
-in_range(IP, Address) ->
-    IP =:= unmap(Address).
+    [Range || Range <- Trusted, in_range(Bits, Range)] =/= [].
+
+in_range(Bits, {Size, Prefix}) when bit_size(Bits) =:= Size ->
+    Length = bit_size(Prefix),
+    case Bits of
+        <<Prefix:Length/bitstring, _/bitstring>> -> true;
+        _ -> false
+    end;
+in_range(_Bits, _Range) ->
+    false.
+
+%% trusted_proxies as {AddressSize, Prefix} bit ranges, checked once per
+%% value of the setting so a mistyped entry fails loudly instead of being
+%% skipped.
+trusted_proxies() ->
+    Setting = application:get_env({{app}}, trusted_proxies, []),
+    case persistent_term:get({?MODULE, trusted_proxies}, undefined) of
+        {Setting, Ranges} ->
+            Ranges;
+        _ ->
+            Ranges = trusted_ranges(Setting),
+            persistent_term:put({?MODULE, trusted_proxies}, {Setting, Ranges}),
+            Ranges
+    end.
+
+trusted_ranges(Setting) when is_list(Setting) ->
+    [trusted_range(Entry) || Entry <- Setting];
+trusted_ranges(Setting) ->
+    invalid_trusted_proxy(Setting).
+
+trusted_range({Network, Length} = Entry) when is_tuple(Network), is_integer(Length) ->
+    case inet:is_ip_address(Network) of
+        true ->
+            Bits = address_bits(unmap(Network)),
+            case Length >= 0 andalso Length =< bit_size(Bits) of
+                true -> {bit_size(Bits), prefix(Bits, Length)};
+                false -> invalid_trusted_proxy(Entry)
+            end;
+        false ->
+            invalid_trusted_proxy(Entry)
+    end;
+trusted_range(Address) ->
+    case inet:is_ip_address(Address) of
+        true ->
+            Bits = address_bits(unmap(Address)),
+            {bit_size(Bits), Bits};
+        false ->
+            invalid_trusted_proxy(Address)
+    end.
+
+invalid_trusted_proxy(Entry) ->
+    erlang:error(
+        {invalid_trusted_proxy, Entry,
+            "trusted_proxies takes a list of address tuples, such as {10, 0, 0, 2}, "
+            "and {Address, PrefixLength} ranges, such as {{10, 1, 0, 0}, 16}"}
+    ).
 
 address_bits({A, B, C, D}) -> <<A, B, C, D>>;
 address_bits({A, B, C, D, E, F, G, H}) -> <<A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>>.
@@ -99,17 +182,23 @@ unmap(IP) -> IP.
 %% 15 minutes, so failing logins in a victim's name hardly locks them out.
 check_account(Email) ->
     case {{app}}_user:normalize_email(Email) of
-        {ok, Normalized} ->
-            ok = ensure_account_limiter(),
-            case seki:check(?ACCOUNT_LIMITER, Normalized) of
-                {allow, _} -> allow;
-                {deny, #{retry_after := RetryAfterMs}} -> {deny, max(1, RetryAfterMs div 1000)}
-            end;
-        error ->
-            allow
+        {ok, Normalized} -> account_check(Normalized);
+        error -> allow
     end.
 
-ensure_account_limiter() ->
+account_check(Key) ->
+    try seki:check(?ACCOUNT_LIMITER, Key) of
+        {allow, _} -> allow;
+        {deny, #{retry_after := RetryAfterMs}} -> {deny, max(1, RetryAfterMs div 1000)}
+    catch
+        error:{limiter_not_found, ?ACCOUNT_LIMITER} ->
+            ok = new_account_limiter(),
+            account_check(Key)
+    end.
+
+%% Created on the first login. Two first logins at once can both get here;
+%% the second sees already_registered.
+new_account_limiter() ->
     Options = #{algorithm => sliding_window, limit => 20, window => 900000},
     case seki:new_limiter(?ACCOUNT_LIMITER, Options) of
         ok -> ok;

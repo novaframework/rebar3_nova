@@ -22,8 +22,14 @@
     trusted_proxy_resolves_the_rightmost_untrusted_hop/1,
     trusted_proxies_take_cidr_ranges/1,
     mapped_addresses_are_unmapped/1,
-    ipv6_addresses_share_a_bucket_per_64/1
+    ipv6_addresses_share_a_bucket_per_64/1,
+    forwarded_hops_may_carry_a_port/1,
+    a_mistyped_trusted_proxy_fails_loudly/1,
+    account_limiter_is_created_once/1,
+    body_limit_reply_has_no_connection_header/1,
+    bearer_token_allows_only_trailing_padding/1
 ]).
+-export([log/2]).
 
 -define(APP, "blog").
 -define(PORT, 58632).
@@ -49,7 +55,12 @@ groups() ->
             trusted_proxy_resolves_the_rightmost_untrusted_hop,
             trusted_proxies_take_cidr_ranges,
             mapped_addresses_are_unmapped,
-            ipv6_addresses_share_a_bucket_per_64
+            ipv6_addresses_share_a_bucket_per_64,
+            forwarded_hops_may_carry_a_port,
+            a_mistyped_trusted_proxy_fails_loudly,
+            account_limiter_is_created_once,
+            body_limit_reply_has_no_connection_header,
+            bearer_token_allows_only_trailing_padding
         ]}
     ].
 
@@ -97,6 +108,7 @@ end_per_group(served, Config) ->
     ],
     application:unset_env(blog, router_module),
     rebar3_nova_test_router:set_routes([]),
+    ok = seki:delete_limiter(blog_account_rate_limit),
     _ = persistent_term:erase(nova_dispatch),
     _ = persistent_term:erase(nova_apps),
     ok;
@@ -150,12 +162,16 @@ public_scope_accepts_a_small_body(_Config) ->
 %% Each attempt comes from a fresh address, so only the per-email limit
 %% can stop the 21st.
 login_is_limited_per_email_across_addresses(_Config) ->
-    Body = json:encode(#{email => ~"Victim@Example.com", password => ~"guess"}),
-    Statuses = [
-        request({127, 1, N, 1}, "POST", "/api/tokens", #{}, Body)
-     || N <- lists:seq(1, 21)
-    ],
+    Login = fun(Source, Email) ->
+        Body = json:encode(#{email => Email, password => ~"guess"}),
+        request(Source, "POST", "/api/tokens", #{}, Body)
+    end,
+    Statuses = [Login({127, 1, N, 1}, ~"Vïctim@Example.com") || N <- lists:seq(1, 21)],
     ?assertEqual(lists:duplicate(20, 401) ++ [429], Statuses),
+    ?assertEqual(429, Login({127, 1, 100, 1}, ~"vïctim@example.com")),
+    Decomposed = unicode:characters_to_nfd_binary(~"VÏCTIM@example.com"),
+    ?assertNotEqual(~"VÏCTIM@example.com", Decomposed),
+    ?assertEqual(429, Login({127, 1, 101, 1}, Decomposed)),
     Other = json:encode(#{email => ~"someone@example.com", password => ~"guess"}),
     ?assertEqual(401, request({127, 1, 99, 1}, "POST", "/api/tokens", #{}, Other)).
 
@@ -247,9 +263,88 @@ ipv6_addresses_share_a_bucket_per_64(_Config) ->
     ),
     ?assertNotEqual(Key({192, 0, 2, 1}), Key({192, 0, 2, 2})).
 
+forwarded_hops_may_carry_a_port(_Config) ->
+    with_trusted([{10, 0, 0, 2}], fun() ->
+        Proxy = {10, 0, 0, 2},
+        Client = fun(Header) -> blog_rate_limit:client_ip(req(Proxy, Header)) end,
+        ?assertEqual({203, 0, 113, 7}, Client(~"203.0.113.7:5678")),
+        ?assertEqual({16#2001, 16#db8, 0, 0, 0, 0, 0, 1}, Client(~"[2001:db8::1]:443")),
+        ?assertEqual({16#2001, 16#db8, 0, 0, 0, 0, 0, 1}, Client(~"[2001:db8::1]")),
+        ?assertEqual({203, 0, 113, 7}, Client(~"203.0.113.7, 10.0.0.2:80")),
+        ?assertEqual({203, 0, 113, 7}, Client(~"203.0.113.7,")),
+        ?assertEqual({203, 0, 113, 7}, Client(~"203.0.113.7, , ")),
+        ?assertEqual(Proxy, Client(~"203.0.113.7:")),
+        ?assertEqual(Proxy, Client(~"203.0.113.7:80x")),
+        ?assertEqual(Proxy, Client(~"[2001:db8::1]x"))
+    end).
+
+a_mistyped_trusted_proxy_fails_loudly(_Config) ->
+    Req = req({10, 0, 0, 2}, ~"203.0.113.7"),
+    [
+        with_trusted(Trusted, fun() ->
+            ?assertError({invalid_trusted_proxy, _, _}, blog_rate_limit:client_ip(Req))
+        end)
+     || Trusted <- [
+            ["10.0.0.2"],
+            "10.0.0.2",
+            {10, 0, 0, 2},
+            [{10, 0, 0, 256}],
+            [{{10, 0, 0, 0}, -1}],
+            [{{10, 0, 0, 0}, 33}],
+            [{{16#fd00, 0, 0, 0, 0, 0, 0, 0}, 129}],
+            [{"10.0.0.0", 8}]
+        ]
+    ],
+    with_trusted([{{10, 0, 0, 2}, 32}], fun() ->
+        ?assertEqual({203, 0, 113, 7}, blog_rate_limit:client_ip(Req))
+    end).
+
+%% seki logs a warning on every new_limiter call for a name it already has.
+account_limiter_is_created_once(_Config) ->
+    ok = logger:add_handler(?MODULE, ?MODULE, #{config => #{pid => self()}}),
+    try
+        Emails = [
+            iolist_to_binary([~"once-", integer_to_list(N), ~"@example.com"])
+         || N <- lists:seq(1, 5)
+        ],
+        ?assertEqual(lists:duplicate(5, allow), [blog_rate_limit:check_account(E) || E <- Emails]),
+        ?assertEqual([], seki_warnings())
+    after
+        logger:remove_handler(?MODULE)
+    end.
+
+body_limit_reply_has_no_connection_header(_Config) ->
+    Req = #{pid => self(), streamid => 1, method => ~"POST", body_length => ?MB},
+    {stop, _, state} = blog_body_limit:pre_request(Req, #{}, #{}, state),
+    receive
+        {{_, 1}, {response, 413, Headers, _Body}} ->
+            ?assertEqual(false, maps:is_key(~"connection", Headers))
+    after 1000 -> ct:fail(no_response)
+    end.
+
+bearer_token_allows_only_trailing_padding(_Config) ->
+    Token = fun(Header) ->
+        blog_auth_security:bearer_token(#{headers => #{~"authorization" => Header}})
+    end,
+    ?assertEqual({ok, ~"abc=="}, Token(~"Bearer abc==")),
+    ?assertEqual(error, Token(~"Bearer ab=c")),
+    ?assertEqual(error, Token(~"Bearer =abc")),
+    ?assertEqual(error, Token(~"Bearer ==")).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
+
+log(#{meta := #{domain := [seki | _]}} = Event, #{config := #{pid := Pid}}) ->
+    Pid ! {seki_log, Event};
+log(_Event, _Config) ->
+    ok.
+
+seki_warnings() ->
+    receive
+        {seki_log, Event} -> [Event | seki_warnings()]
+    after 100 -> []
+    end.
 
 %% The route groups from step 4 of the printed instructions.
 printed_routes() ->

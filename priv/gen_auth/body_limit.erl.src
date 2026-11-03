@@ -13,7 +13,7 @@ pre_request(Req, _Env, Options, State) ->
         Length when is_integer(Length), Length =< Max ->
             {ok, Req, State};
         _ ->
-            Headers = #{~"content-type" => ~"application/json", ~"connection" => ~"close"},
+            Headers = #{~"content-type" => ~"application/json"},
             Body = iolist_to_binary(json:encode(#{~"error" => ~"request body too large"})),
             {stop, cowboy_req:reply(413, Headers, Body, Req), State}
     end.
