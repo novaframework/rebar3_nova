@@ -23,7 +23,11 @@
     openapi_schema_is_the_request_body_only/1,
     openapi_component_schemas_drop_json_schema_keywords/1,
     openapi_prefix_limits_the_paths/1,
-    openapi_operation_ids_are_unique/1
+    openapi_operation_ids_are_unique/1,
+    openapi_nested_schemas_are_loaded_by_relative_path/1,
+    openapi_same_basename_schemas_do_not_collide/1,
+    openapi_component_name_collision_is_an_error/1,
+    openapi_unknown_schema_gets_no_ref/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -47,7 +51,11 @@ all() ->
         openapi_schema_is_the_request_body_only,
         openapi_component_schemas_drop_json_schema_keywords,
         openapi_prefix_limits_the_paths,
-        openapi_operation_ids_are_unique
+        openapi_operation_ids_are_unique,
+        openapi_nested_schemas_are_loaded_by_relative_path,
+        openapi_same_basename_schemas_do_not_collide,
+        openapi_component_name_collision_is_an_error,
+        openapi_unknown_schema_gets_no_ref
     ].
 
 init_per_suite(Config) ->
@@ -217,13 +225,18 @@ openapi_responses_follow_the_method(_Config) ->
     ?assertEqual([~"200", ~"404"], response_codes(Paths, ~"/tags/{id}", ~"put")).
 
 openapi_schema_is_the_request_body_only(_Config) ->
-    Extra = #{json_schema => "./schemas/tag.json"},
-    Paths = spec_paths([
-        {~"/tags", ~"get", test_controller, list, Extra},
-        {~"/tags", ~"post", test_controller, create, Extra}
-    ]),
+    Extra = #{json_schema => "schemas/tag.json"},
+    Paths = spec_paths(
+        [
+            {~"/tags", ~"get", test_controller, list, Extra},
+            {~"/tags", ~"post", test_controller, create, Extra}
+        ],
+        #{~"tag" => #{~"type" => ~"object"}}
+    ),
     #{~"get" := Get, ~"post" := Post} = maps:get(~"/tags", Paths),
     ?assertNot(maps:is_key(~"requestBody", Get)),
+    ?assertEqual([~"200"], response_codes(Paths, ~"/tags", ~"get")),
+    [?assertNot(maps:is_key(~"content", R)) || R <- maps:values(maps:get(~"responses", Get))],
     ?assertMatch(
         #{~"content" := #{~"application/json" := #{~"schema" := #{~"$ref" := _}}}},
         maps:get(~"requestBody", Post)
@@ -269,12 +282,83 @@ openapi_operation_ids_are_unique(_Config) ->
     ?assertEqual(length(Ids), length(lists:usort(Ids))),
     ?assert(lists:member(~"test_controller.show", Ids)).
 
+%% nova_json_schemas keys schemas by their path under priv/schemas, so a
+%% route's "schemas/nested/x.json" must resolve to a loaded component.
+openapi_nested_schemas_are_loaded_by_relative_path(Config) ->
+    AppDir = filename:join(?config(priv_dir, Config), "nested_app"),
+    SchemaDir = filename:join([AppDir, "priv", "schemas"]),
+    write_schema(SchemaDir, "tag.json", #{~"type" => ~"object"}),
+    write_schema(SchemaDir, "nested/x.json", #{
+        ~"$schema" => ~"http://json-schema.org/draft-06/schema#", ~"type" => ~"object"
+    }),
+    Schemas = rebar3_nova_openapi:load_schemas(AppDir),
+    ?assertEqual([~"nested.x", ~"tag"], lists:sort(maps:keys(Schemas))),
+    ?assertEqual(#{~"type" => ~"object"}, maps:get(~"nested.x", Schemas)),
+    Paths = spec_paths(
+        [{~"/x", ~"post", test_controller, create, #{json_schema => "schemas/nested/x.json"}}],
+        Schemas
+    ),
+    ?assertEqual(~"#/components/schemas/nested.x", request_ref(Paths, ~"/x", ~"post")).
+
+openapi_same_basename_schemas_do_not_collide(Config) ->
+    AppDir = filename:join(?config(priv_dir, Config), "versioned_app"),
+    SchemaDir = filename:join([AppDir, "priv", "schemas"]),
+    write_schema(SchemaDir, "v1/user.json", #{~"title" => ~"v1"}),
+    write_schema(SchemaDir, "v2/user.json", #{~"title" => ~"v2"}),
+    Schemas = rebar3_nova_openapi:load_schemas(AppDir),
+    ?assertEqual(
+        #{~"v1.user" => #{~"title" => ~"v1"}, ~"v2.user" => #{~"title" => ~"v2"}}, Schemas
+    ),
+    Paths = spec_paths(
+        [
+            {~"/v1/users", ~"post", test_controller, create, #{
+                json_schema => "schemas/v1/user.json"
+            }},
+            {~"/v2/users", ~"post", test_controller, create, #{
+                json_schema => "schemas/v2/user.json"
+            }}
+        ],
+        Schemas
+    ),
+    ?assertEqual(~"#/components/schemas/v1.user", request_ref(Paths, ~"/v1/users", ~"post")),
+    ?assertEqual(~"#/components/schemas/v2.user", request_ref(Paths, ~"/v2/users", ~"post")).
+
+openapi_component_name_collision_is_an_error(_Config) ->
+    ?assertMatch(
+        {error, {collision, ~"a.b", ["a.b.json", "a/b.json"]}},
+        rebar3_nova_openapi:component_names(["a/b.json", "a.b.json"])
+    ),
+    ?assertMatch({ok, [_, _]}, rebar3_nova_openapi:component_names(["a/b.json", "a_b.json"])).
+
+openapi_unknown_schema_gets_no_ref(_Config) ->
+    Paths = spec_paths([
+        {~"/x", ~"post", test_controller, create, #{json_schema => "schemas/missing.json"}}
+    ]),
+    ?assertNot(maps:is_key(~"requestBody", maps:get(~"post", maps:get(~"/x", Paths)))).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
 
 spec_paths(Routes) ->
-    maps:get(~"paths", rebar3_nova_openapi:build_spec("t", "1", Routes, #{})).
+    spec_paths(Routes, #{}).
+
+spec_paths(Routes, Schemas) ->
+    maps:get(~"paths", rebar3_nova_openapi:build_spec("t", "1", Routes, Schemas)).
+
+write_schema(Dir, RelPath, Schema) ->
+    Path = filename:join(Dir, RelPath),
+    ok = filelib:ensure_dir(Path),
+    ok = file:write_file(Path, json:encode(Schema)).
+
+request_ref(Paths, Path, Method) ->
+    #{
+        ~"requestBody" := #{
+            ~"content" := #{~"application/json" := #{~"schema" := #{~"$ref" := Ref}}}
+        }
+    } =
+        maps:get(Method, maps:get(Path, Paths)),
+    Ref.
 
 response_codes(Paths, Path, Method) ->
     lists:sort(maps:keys(maps:get(~"responses", maps:get(Method, maps:get(Path, Paths))))).

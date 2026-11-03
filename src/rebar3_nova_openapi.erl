@@ -3,7 +3,13 @@
 -export([init/1, do/1, format_error/1]).
 
 %% Exported for rebar3_nova_dispatch_SUITE.
--export([collect_routes/1, collect_routes/2, build_spec/4, component_schema/1]).
+-export([
+    collect_routes/1, collect_routes/2,
+    build_spec/4,
+    component_schema/1,
+    component_names/1,
+    load_schemas/1
+]).
 
 -include("nova_router.hrl").
 
@@ -116,16 +122,48 @@ expand_methods(Method, Path, Module, Function, Extra) ->
 %% ===================================================================
 load_schemas(AppDir) ->
     SchemaDir = filename:join([AppDir, "priv", "schemas"]),
-    Files = filelib:wildcard("*.json", unicode:characters_to_list(SchemaDir)),
-    maps:from_list([Schema || File <- Files, {ok, Schema} <- [load_schema(SchemaDir, File)]]).
+    Files = filelib:wildcard("**/*.json", unicode:characters_to_list(SchemaDir)),
+    case component_names(Files) of
+        {ok, Named} ->
+            maps:from_list([
+                {Name, Schema}
+             || {Name, File} <- Named, {ok, Schema} <- [load_schema(SchemaDir, File)]
+            ]);
+        {error, {collision, Name, Paths}} ->
+            rebar_api:abort("Schemas ~p all map to the component name ~ts; rename one", [
+                Paths, Name
+            ])
+    end.
+
+-doc """
+Component names for schema files, given relative to `priv/schemas` as
+nova_json_schemas keys them: `v1/user.json` becomes `v1.user`. Characters
+an OpenAPI component name cannot hold become `_`; two files that end up
+with the same name are an error rather than one silently replacing the
+other.
+""".
+-spec component_names([file:filename()]) ->
+    {ok, [{binary(), file:filename()}]} | {error, {collision, binary(), [file:filename()]}}.
+component_names(Files) ->
+    Named = lists:sort([{component_name(File), File} || File <- Files]),
+    case [Name || {Name, _} <- Named] -- lists:usort([Name || {Name, _} <- Named]) of
+        [] ->
+            {ok, Named};
+        [Name | _] ->
+            {error, {collision, Name, [File || {N, File} <- Named, N =:= Name]}}
+    end.
+
+component_name(RelPath) ->
+    Segments = filename:split(filename:rootname(RelPath, ".json")),
+    Joined = unicode:characters_to_binary(lists:join(".", Segments)),
+    re:replace(Joined, "[^A-Za-z0-9._-]", "_", [global, unicode, {return, binary}]).
 
 load_schema(SchemaDir, File) ->
     case file:read_file(filename:join(SchemaDir, File)) of
         {ok, Bin} ->
             try json:decode(Bin) of
                 Decoded when is_map(Decoded) ->
-                    Name = unicode:characters_to_binary(filename:basename(File, ".json")),
-                    {ok, {Name, component_schema(Decoded)}};
+                    {ok, component_schema(Decoded)};
                 _ ->
                     rebar_api:warn("Schema is not a JSON object: ~s", [File]),
                     error
@@ -160,18 +198,18 @@ build_spec(Title, Version, Routes, Schemas) ->
             ~"title" => unicode:characters_to_binary(Title),
             ~"version" => unicode:characters_to_binary(Version)
         },
-        ~"paths" => build_paths(Routes)
+        ~"paths" => build_paths(Routes, Schemas)
     },
     case maps:size(Schemas) of
         0 -> Spec;
         _ -> Spec#{~"components" => #{~"schemas" => Schemas}}
     end.
 
-build_paths(Routes) ->
+build_paths(Routes, Schemas) ->
     BaseIds = [operation_id(Module, Function) || {_, _, Module, Function, _} <- Routes],
     Shared = BaseIds -- lists:usort(BaseIds),
     Operations = [
-        {Path, Method, operation(Route, unique_id(Route, Shared))}
+        {Path, Method, operation(Route, unique_id(Route, Shared), Schemas)}
      || {Path, Method, _, _, _} = Route <- Routes
     ],
     Paths = lists:usort([Path || {Path, _, _} <- Operations]),
@@ -192,9 +230,9 @@ unique_id({Path, Method, Module, Function, _Extra}, Shared) ->
         false -> Base
     end.
 
-operation({Path, Method, _Module, _Function, Extra}, OpId) ->
+operation({Path, Method, _Module, _Function, Extra}, OpId, Schemas) ->
     Params = extract_path_params(Path),
-    Body = request_body(Method, schema_ref(Extra)),
+    Body = request_body(Method, schema_ref(Extra, Schemas)),
     Operation0 = #{
         ~"operationId" => OpId,
         ~"responses" => responses(Method, Body =/= none, Params =/= [])
@@ -209,12 +247,21 @@ operation({Path, Method, _Module, _Function, Extra}, OpId) ->
         _ -> Operation1#{~"requestBody" => Body}
     end.
 
-schema_ref(#{json_schema := SchemaPath}) ->
-    Basename = filename:basename(SchemaPath, ".json"),
-    Name = unicode:characters_to_binary(Basename),
-    {ok, <<"#/components/schemas/", Name/binary>>};
-schema_ref(_) ->
+%% json_schema names the request-body schema, as nova_json_schemas reads it:
+%% a path such as "schemas/v1/user.json", relative to priv. A schema that
+%% was not loaded gets no $ref, which would dangle.
+schema_ref(#{json_schema := SchemaPath}, Schemas) when is_list(SchemaPath); is_binary(SchemaPath) ->
+    Name = component_name(schema_relative_path(unicode:characters_to_list(SchemaPath))),
+    case maps:is_key(Name, Schemas) of
+        true -> {ok, <<"#/components/schemas/", Name/binary>>};
+        false -> none
+    end;
+schema_ref(_Extra, _Schemas) ->
     none.
+
+schema_relative_path("./" ++ Path) -> schema_relative_path(Path);
+schema_relative_path("schemas/" ++ Path) -> Path;
+schema_relative_path(Path) -> Path.
 
 request_body(Method, {ok, Ref}) when
     Method =:= ~"post"; Method =:= ~"put"; Method =:= ~"patch"
