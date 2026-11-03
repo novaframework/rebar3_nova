@@ -16,13 +16,20 @@
     public_scope_refuses_a_large_body_unread/1,
     public_scope_refuses_a_chunked_body_unread/1,
     public_scope_accepts_a_small_body/1,
+    login_is_limited_per_email_and_address/1,
     login_is_limited_per_email_across_addresses/1,
+    malformed_login_spends_no_attempts/1,
     invalid_utf8_authorization_is_unauthorized/1,
     auth_data_has_no_password_hash/1,
     bearer_token_is_bytewise/1,
     ipv6_addresses_share_a_bucket_per_64/1,
     rate_limit_key_uses_nova_auth_trusted_proxies/1,
     account_limiter_is_created_once/1,
+    limiters_allow_5_per_address_and_50_per_email_in_5_minutes/1,
+    limiters_key_on_a_hash_of_the_email/1,
+    emails_over_254_bytes_are_not_counted/1,
+    token_response_is_not_cached/1,
+    registration_hides_database_errors/1,
     body_limit_reply_has_no_connection_header/1,
     bearer_token_allows_only_trailing_padding/1,
     files_are_valid_formatted_erlang/1,
@@ -39,12 +46,15 @@
     token_schema_has_the_refresh_fields_and_indexes/1,
     registration_needs_email_and_a_long_password/1,
     registration_normalises_the_email/1,
+    registration_caps_the_email_at_254_bytes/1,
     changesets_scrub_the_password/1,
     routes_state_their_plugin_strategy/1,
     deps_list_seki_for_the_login_limit/1,
     sessions_are_turned_off_only_without_session_pages/1,
     body_limit_names_bodies_without_content_length/1,
-    protected_group_example_uses_neutral_names/1
+    protected_group_example_uses_neutral_names/1,
+    instructions_name_the_lockout_cpu_and_bypass_limits/1,
+    suite_covers_the_limits_and_unauthenticated_requests/1
 ]).
 -export([log/2]).
 
@@ -62,7 +72,9 @@ groups() ->
             public_scope_refuses_a_large_body_unread,
             public_scope_refuses_a_chunked_body_unread,
             public_scope_accepts_a_small_body,
+            login_is_limited_per_email_and_address,
             login_is_limited_per_email_across_addresses,
+            malformed_login_spends_no_attempts,
             invalid_utf8_authorization_is_unauthorized
         ]},
         {modules, [], [
@@ -71,6 +83,11 @@ groups() ->
             ipv6_addresses_share_a_bucket_per_64,
             rate_limit_key_uses_nova_auth_trusted_proxies,
             account_limiter_is_created_once,
+            limiters_allow_5_per_address_and_50_per_email_in_5_minutes,
+            limiters_key_on_a_hash_of_the_email,
+            emails_over_254_bytes_are_not_counted,
+            token_response_is_not_cached,
+            registration_hides_database_errors,
             body_limit_reply_has_no_connection_header,
             bearer_token_allows_only_trailing_padding
         ]},
@@ -89,12 +106,15 @@ groups() ->
             token_schema_has_the_refresh_fields_and_indexes,
             registration_needs_email_and_a_long_password,
             registration_normalises_the_email,
+            registration_caps_the_email_at_254_bytes,
             changesets_scrub_the_password,
             routes_state_their_plugin_strategy,
             deps_list_seki_for_the_login_limit,
             sessions_are_turned_off_only_without_session_pages,
             body_limit_names_bodies_without_content_length,
-            protected_group_example_uses_neutral_names
+            protected_group_example_uses_neutral_names,
+            instructions_name_the_lockout_cpu_and_bypass_limits,
+            suite_covers_the_limits_and_unauthenticated_requests
         ]}
     ].
 
@@ -107,6 +127,7 @@ init_per_suite(Config) ->
     _ = [
         compile_source(Config, Name, rebar3_nova_gen_auth:render(Template, ?APP))
      || {Template, Name} <- [
+            {"auth.erl.src", "blog_auth"},
             {"user.erl.src", "blog_user"},
             {"auth_security.erl.src", "blog_auth_security"},
             {"login_limit.erl.src", "blog_login_limit"},
@@ -146,7 +167,13 @@ end_per_group(served, Config) ->
     ],
     application:unset_env(blog, router_module),
     rebar3_nova_test_router:set_routes([]),
-    ok = seki:delete_limiter(blog_login_limit),
+    %% Empties every limiter, nova_auth_rate_limit's too, so a repeated run
+    %% starts with fresh counts. nova_auth caches its limiter as created, so
+    %% the limiters stay.
+    [
+        true = ets:delete_all_objects(limiter_table(Name))
+     || {Name, _, _, _, _} <- ets:tab2list(seki_limiter_registry), is_atom(Name)
+    ],
     _ = persistent_term:erase(nova_dispatch),
     _ = persistent_term:erase(nova_apps),
     ok;
@@ -197,21 +224,35 @@ public_scope_accepts_a_small_body(_Config) ->
     ?assertEqual(401, Status),
     ?assertNotEqual([], Reads).
 
-%% Each attempt comes from a fresh address, so only the per-email limit
-%% can stop the 21st.
+%% The 6th attempt from one address is refused; another address may still try.
+login_is_limited_per_email_and_address(_Config) ->
+    Statuses = [login({127, 4, 1, 1}, ~"tiered@example.org") || _ <- lists:seq(1, 6)],
+    ?assertEqual(lists:duplicate(5, 401) ++ [429], Statuses),
+    ?assertEqual(401, login({127, 4, 2, 1}, ~"tiered@example.org")).
+
+%% 10 addresses with 5 attempts each use up the email's 50, so the next
+%% address is refused at once.
 login_is_limited_per_email_across_addresses(_Config) ->
-    Login = fun(Source, Email) ->
-        Body = json:encode(#{email => Email, password => ~"guess"}),
-        request(Source, "POST", "/api/tokens", #{}, Body)
-    end,
-    Statuses = [Login({127, 1, N, 1}, ~"Zoë.Lindqvist@Example.org") || N <- lists:seq(1, 21)],
-    ?assertEqual(lists:duplicate(20, 401) ++ [429], Statuses),
-    ?assertEqual(429, Login({127, 1, 100, 1}, ~"zoë.lindqvist@example.org")),
+    Email = ~"Zoë.Lindqvist@Example.org",
+    Statuses = [login({127, 1, N, 1}, Email) || N <- lists:seq(1, 10), _ <- lists:seq(1, 5)],
+    ?assertEqual(lists:duplicate(50, 401), Statuses),
+    ?assertEqual(429, login({127, 1, 100, 1}, ~"zoë.lindqvist@example.org")),
     Decomposed = unicode:characters_to_nfd_binary(~"ZOË.LINDQVIST@example.org"),
     ?assertNotEqual(~"ZOË.LINDQVIST@example.org", Decomposed),
-    ?assertEqual(429, Login({127, 1, 101, 1}, Decomposed)),
-    Other = json:encode(#{email => ~"someone@example.com", password => ~"guess"}),
-    ?assertEqual(401, request({127, 1, 99, 1}, "POST", "/api/tokens", #{}, Other)).
+    ?assertEqual(429, login({127, 1, 101, 1}, Decomposed)),
+    ?assertEqual(401, login({127, 1, 99, 1}, ~"someone@example.com")).
+
+%% A body without string email and password is refused before the limits,
+%% so it spends none of the email's attempts.
+malformed_login_spends_no_attempts(_Config) ->
+    Source = {127, 3, 1, 1},
+    Malformed = json:encode(#{email => ~"malformed@example.org", password => 1}),
+    ?assertEqual(
+        lists:duplicate(5, 400),
+        [request(Source, "POST", "/api/tokens", #{}, Malformed) || _ <- lists:seq(1, 5)]
+    ),
+    Statuses = [login(Source, ~"malformed@example.org") || _ <- lists:seq(1, 5)],
+    ?assertEqual(lists:duplicate(5, 401), Statuses).
 
 invalid_utf8_authorization_is_unauthorized(_Config) ->
     Headers = #{"authorization" => [255, 255, 255, 255, 255, 255, " abc"]},
@@ -278,11 +319,58 @@ account_limiter_is_created_once(_Config) ->
             iolist_to_binary([~"once-", integer_to_list(N), ~"@example.com"])
          || N <- lists:seq(1, 5)
         ],
-        ?assertEqual(lists:duplicate(5, allow), [blog_login_limit:check(E) || E <- Emails]),
+        Checks = [blog_login_limit:check(E, req({192, 0, 2, 1}, ~"")) || E <- Emails],
+        ?assertEqual(lists:duplicate(5, allow), Checks),
         ?assertEqual([], seki_warnings())
     after
         logger:remove_handler(?MODULE)
     end.
+
+%% seki's cleanup drops rows older than 10 minutes, so a longer window
+%% would reset early.
+limiters_allow_5_per_address_and_50_per_email_in_5_minutes(_Config) ->
+    allow = blog_login_limit:check(~"windows@example.org", req({192, 0, 2, 2}, ~"")),
+    ?assertEqual(
+        [#{limit => 5, window => 300000}, #{limit => 50, window => 300000}],
+        [limiter_config(Name) || Name <- limiters()]
+    ).
+
+%% The tables hold a SHA-256 of the normalised email, never the email.
+limiters_key_on_a_hash_of_the_email(_Config) ->
+    allow = blog_login_limit:check(~"Hashed.Key@Example.org", req({192, 0, 2, 3}, ~"")),
+    Rows = term_to_binary(limiter_rows()),
+    ?assertNotEqual(nomatch, binary:match(Rows, crypto:hash(sha256, ~"hashed.key@example.org"))),
+    ?assertEqual(nomatch, binary:match(Rows, [~"hashed.key", ~"Hashed.Key"])).
+
+%% No account has an email over 254 bytes, so such an email takes no room in
+%% the tables, however long it is.
+emails_over_254_bytes_are_not_counted(_Config) ->
+    Req = req({192, 0, 2, 4}, ~""),
+    allow = blog_login_limit:check(~"first@example.org", Req),
+    Before = limiter_rows(),
+    ?assertEqual(allow, blog_login_limit:check(email_of(255), Req)),
+    ?assertEqual(allow, blog_login_limit:check(email_of(1000000), Req)),
+    ?assertEqual(Before, limiter_rows()),
+    ?assertEqual(allow, blog_login_limit:check(email_of(254), Req)),
+    ?assertNotEqual(Before, limiter_rows()).
+
+%% RFC 6749 section 5.1.
+token_response_is_not_cached(_Config) ->
+    Json = #{~"email" => ~"reader@example.org", ~"password" => ~"the right password"},
+    {json, 201, Headers, #{~"token" := ~"issued-token"}} =
+        blog_auth_controller:login((req({192, 0, 2, 5}, ~""))#{json => Json}),
+    ?assertEqual(#{~"cache-control" => ~"no-store", ~"pragma" => ~"no-cache"}, Headers).
+
+%% A base error is the database failing; its text goes to the log, not the client.
+registration_hides_database_errors(_Config) ->
+    ?assertEqual(
+        {json, 503, #{}, #{~"error" => ~"try again later"}},
+        blog_auth_controller:register(#{json => #{~"email" => ~"down@example.org"}})
+    ),
+    ?assertEqual(
+        {json, 422, #{}, #{~"errors" => #{~"email" => [~"has already been taken"]}}},
+        blog_auth_controller:register(#{json => #{~"email" => ~"taken@example.org"}})
+    ).
 
 body_limit_reply_has_no_connection_header(_Config) ->
     Req = #{pid => self(), streamid => 1, method => ~"POST", body_length => ?MB},
@@ -381,7 +469,7 @@ instructions_cover_sessions_enumeration_and_proxies(_Config) ->
             "Only if the app has no session or cookie-based pages",
             "tells anyone which emails have accounts",
             "{nova_auth, [{trusted_proxies, [",
-            "20 attempts per email"
+            "5 attempts per email and client address and 50 per email from all addresses"
         ]
     ].
 
@@ -423,6 +511,15 @@ registration_needs_email_and_a_long_password(_Config) ->
 registration_normalises_the_email(_Config) ->
     Changeset = registration(unicode:characters_to_nfd_binary(~"Zoë@Example.ORG"), ~"twelve chars"),
     ?assertEqual(~"zoë@example.org", kura_changeset:get_change(Changeset, email)).
+
+%% Counted in bytes, as the login limit counts them.
+registration_caps_the_email_at_254_bytes(_Config) ->
+    ?assert((registration(email_of(254), ~"twelve chars"))#kura_changeset.valid),
+    TooLong = registration(email_of(255), ~"twelve chars"),
+    ?assertMatch([{email, _}], TooLong#kura_changeset.errors),
+    ?assertEqual(undefined, kura_changeset:get_change(TooLong, hashed_password)),
+    Wide = registration(<<(binary:copy(~"ö", 122))/binary, "@example.org">>, ~"twelve chars"),
+    ?assertMatch([{email, _}], Wide#kura_changeset.errors).
 
 %% A changeset comes back in {error, CS} and can reach a log or crash report.
 changesets_scrub_the_password(_Config) ->
@@ -477,6 +574,39 @@ protected_group_example_uses_neutral_names(_Config) ->
     [{_, Create, _}] = maps:get(routes, Group),
     ?assertEqual(fun blog_item_controller:create/1, Create),
     ?assertEqual(nomatch, string:find(Step, "post_controller")).
+
+instructions_name_the_lockout_cpu_and_bypass_limits(_Config) ->
+    Text = rebar3_nova_gen_auth:instructions(?APP),
+    [
+        ?assertNotEqual(nomatch, string:find(Text, Needle), Needle)
+     || Needle <- [
+            "lock its owner out until the window passes",
+            "hashes a password with PBKDF2, which costs real CPU",
+            "Under global_only or {override, _} the groups' plugin lists are dropped entirely",
+            "puts every client in one bucket, and trusted_proxies cannot fix that",
+            "each test sends from its own loopback address, 127.0.N.1"
+        ]
+    ].
+
+%% The generated suite runs against a database, so the cases are checked
+%% here and run in an app that has one.
+suite_covers_the_limits_and_unauthenticated_requests(Config) ->
+    Suite = compile_source(Config, "blog_auth_SUITE", render_auth("auth_SUITE.erl.src")),
+    Cases = Suite:all(),
+    [
+        ?assert(lists:member(Case, Cases), Case)
+     || Case <- [
+            unknown_email_is_rejected_like_a_wrong_password,
+            me_needs_an_authorization_header,
+            large_body_is_refused,
+            logins_from_one_address_are_limited,
+            logins_for_one_email_are_limited,
+            bearer_routes_do_not_read_an_unauthenticated_body
+        ]
+    ],
+    Sources = [proplists:get_value(source, Suite:init_per_testcase(Case, [])) || Case <- Cases],
+    ?assertEqual(length(Cases), length(lists:usort(Sources))),
+    [?assertMatch({127, 0, N, 1} when N > 0, Source) || Source <- Sources].
 
 %%====================================================================
 %% Helpers
@@ -537,12 +667,43 @@ printed_routes() ->
     {value, Routes, _} = erl_eval:expr(Expr, []),
     Routes.
 
+login(Source, Email) ->
+    request(
+        Source, "POST", "/api/tokens", #{}, json:encode(#{email => Email, password => ~"guess"})
+    ).
+
+%% An email of Bytes bytes.
+email_of(Bytes) ->
+    <<(binary:copy(~"a", Bytes - 12))/binary, "@example.org">>.
+
+limiters() ->
+    [blog_login_limit_client, blog_login_limit_account].
+
+limiter_config(Name) ->
+    {_Algorithm, _Backend, _Tab, Config} = seki_limiter_registry:lookup(Name),
+    Config.
+
+limiter_rows() ->
+    [lists:sort(ets:tab2list(limiter_table(Name))) || Name <- limiters()].
+
+%% seki types a backend's state as term(); seki_backend_ets keeps its table there.
+-spec limiter_table(atom()) -> dynamic().
+limiter_table(Name) ->
+    {_Algorithm, seki_backend_ets, Tab, _Config} = seki_limiter_registry:lookup(Name),
+    Tab.
+
 accounts_stub() ->
     ~"""
     -module(blog_accounts).
-    -export([authenticate/2, user_for_token/1, register/1]).
+    -include_lib("kura/include/kura.hrl").
+    -export([authenticate/2, issue_token/1, user_for_token/1, register/1]).
 
-    authenticate(_Email, _Password) -> {error, invalid_credentials}.
+    authenticate(~"reader@example.org", ~"the right password") ->
+        {ok, #{id => 2, email => ~"reader@example.org"}};
+    authenticate(_Email, _Password) ->
+        {error, invalid_credentials}.
+
+    issue_token(#{id := 2}) -> {ok, ~"issued-token"}.
 
     user_for_token(~"valid-token") ->
         {ok, #{
@@ -554,7 +715,10 @@ accounts_stub() ->
     user_for_token(_Token) ->
         {error, not_found}.
 
-    register(_Params) -> {error, not_used}.
+    register(#{~"email" := ~"down@example.org"}) ->
+        {error, #kura_changeset{errors = [{base, ~"connection refused by 10.0.0.5"}]}};
+    register(#{~"email" := ~"taken@example.org"}) ->
+        {error, #kura_changeset{errors = [{email, ~"has already been taken"}]}}.
     """.
 
 req(Peer, ForwardedFor) ->

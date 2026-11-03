@@ -1,8 +1,11 @@
 -module({{app}}_login_limit).
 
--export([key/1, check/1]).
+-export([key/1, check/2]).
 
--define(LIMITER, {{app}}_login_limit).
+%% Every window is at most 5 minutes: seki's cleanup drops rows older than
+%% 10 minutes, which would reset a longer window early.
+-define(WINDOW, 300000).
+-define(MAX_EMAIL_BYTES, 254).
 
 %% The rate-limit key for nova_auth_rate_limit: nova_auth's client_ip/1,
 %% which reads trusted_proxies from the nova_auth env, with IPv6 cut to
@@ -13,31 +16,54 @@ key(Req) ->
         IP -> IP
     end.
 
-%% A per-account limit on top of the per-address one, so rotating addresses
-%% does not buy unlimited guesses at one password. It is generous, 20 per
-%% 15 minutes, so failing logins in someone else's name hardly locks them
-%% out.
-check(Email) ->
+%% Per-account limits on top of the per-address one, so rotating addresses
+%% does not buy unlimited guesses at one password: 5 attempts per account
+%% and client address, and 50 per account from all addresses, each per
+%% 5 minutes. The first limit that denies answers.
+%%
+%% The trade-off: anyone who knows an email can spend the account's 50
+%% attempts from 10 addresses (or IPv6 /64s), and then its owner cannot
+%% log in either until the window passes. The per-address tier keeps one
+%% address from doing it alone.
+%%
+%% The limiters key on a SHA-256 of the normalised email, so the ETS
+%% tables hold no addresses and an entry has a fixed size.
+check(Email, Req) ->
     case {{app}}_user:normalize_email(Email) of
-        {ok, Normalized} -> check_key(Normalized);
-        error -> allow
+        {ok, Normalized} when byte_size(Normalized) =< ?MAX_EMAIL_BYTES ->
+            Account = crypto:hash(sha256, Normalized),
+            first_deny([
+                {{{app}}_login_limit_client, {Account, key(Req)}, 5},
+                {{{app}}_login_limit_account, Account, 50}
+            ]);
+        _ ->
+            %% No account has this email, so there is nothing to protect.
+            allow
     end.
 
-check_key(Key) ->
-    try seki:check(?LIMITER, Key) of
+first_deny([]) ->
+    allow;
+first_deny([{Limiter, Key, Limit} | Rest]) ->
+    case check_limiter(Limiter, Key, Limit) of
+        allow -> first_deny(Rest);
+        {deny, RetryAfter} -> {deny, RetryAfter}
+    end.
+
+check_limiter(Limiter, Key, Limit) ->
+    try seki:check(Limiter, Key) of
         {allow, _} -> allow;
         {deny, #{retry_after := RetryAfterMs}} -> {deny, max(1, RetryAfterMs div 1000)}
     catch
-        error:{limiter_not_found, ?LIMITER} ->
-            ok = new_limiter(),
-            check_key(Key)
+        error:{limiter_not_found, Limiter} ->
+            ok = new_limiter(Limiter, Limit),
+            check_limiter(Limiter, Key, Limit)
     end.
 
 %% Created on the first login. Two first logins at once can both get here;
 %% the second sees already_registered.
-new_limiter() ->
-    Options = #{algorithm => sliding_window, limit => 20, window => 900000},
-    case seki:new_limiter(?LIMITER, Options) of
+new_limiter(Limiter, Limit) ->
+    Options = #{algorithm => sliding_window, limit => Limit, window => ?WINDOW},
+    case seki:new_limiter(Limiter, Options) of
         ok -> ok;
         {error, already_registered} -> ok
     end.

@@ -143,7 +143,7 @@ Scaffolds email/password authentication with bearer tokens on [nova_auth](https:
 - `src/myapp_login_limit.erl`: the rate-limit key and the per-email login limit
 - `src/controllers/myapp_auth_controller.erl`: `register/1`, `login/1`, `logout/1`, `me/1`
 - `src/plugins/myapp_body_limit.erl`: refuses request bodies over `max_bytes` (default 65536) before they are read
-- `test/myapp_auth_SUITE.erl`
+- `test/myapp_auth_SUITE.erl`: registration, login, logout, the 401s, the 413 and both 429s against the running app. Each test sends from its own loopback address, `127.0.N.1`, so the limits do not carry over between tests or runs; on macOS add those addresses with `ifconfig lo0 alias`.
 
 ```
 $ rebar3 nova gen_auth
@@ -156,7 +156,10 @@ It then prints the deps (`{nova_auth, "~> 0.3"}`, `{seki, "~> 0.4"}` for `myapp_
 - The public route group runs `nova_auth_rate_limit`, then `myapp_body_limit`, then `nova_request_plugin`, so a flood, an oversized body or a body without content-length (HTTP/1.1 chunked or HTTP/2) is refused with 429 or 413 before anything reads it. The bearer group sets `plugins => []`: Nova runs pre-request plugins before security, so a global body-decoding plugin would read the body of a request that has no token at all. The instructions print a protected group for your own routes with `myapp_body_limit` before `nova_request_plugin`, for the same reason. These groups assume Nova's default `plugin_strategy`, `local_or_global`; under `global_first` or `local_first` the global plugins are merged in, and a global `nova_request_plugin` decodes the body before the limits run. `myapp_body_limit` stays with nova 0.19, whose `nova_request_plugin` caps the body it decodes (`max_body_length`, 1 MB by default) but reads a body without content-length up to that cap; the plugin refuses it unread, at a lower limit.
 - `require_bearer/1` reads the `Authorization` header bytewise (anything but a well-formed `Bearer <b64token>` is a 401, never a crash) and puts only the user's `id` and `email` in `auth_data`, never the password hash.
 - The rate limit keys on `nova_auth_rate_limit:client_ip/1` with IPv6 cut to its /64 (`myapp_login_limit:key/1`). Behind a reverse proxy, list the proxies as `{nova_auth, [{trusted_proxies, [...]}]}`.
-- `login/1` also allows 20 attempts per normalised email in 15 minutes, whatever the address, so rotating addresses does not buy unlimited guesses. The limit is generous so that failing logins in someone's name hardly locks them out.
+- `login/1` refuses a body without string `email` and `password` with 400 before any limit is consulted. It then allows 5 attempts per email and client address and 50 per email from all addresses, each per 5 minutes; the first limit that denies answers with 429. The trade-off: anyone who knows an email can use up its 50 attempts from 10 addresses (or IPv6 /64s) and lock its owner out until the window passes. The limiters key on a SHA-256 of the normalised email, which is capped at 254 bytes (as in the user schema). Windows stay at 5 minutes because seki's cleanup drops rows after 10.
+- A successful login answers with `cache-control: no-store` and `pragma: no-cache` (RFC 6749 section 5.1). A registration that fails in the database (a kura `base` error) answers 503 `{"error": "try again later"}` and is logged; field errors stay 422.
+- Login and registration hash with PBKDF2, which costs real CPU. The per-address limit bounds one client, but many at once can still saturate the schedulers.
+- `plugin_strategy` `global_only` or `{override, _}` drops the groups' plugin lists, so neither limit runs. A layer 4 load balancer that rewrites the source address puts every client in one bucket, which `trusted_proxies` cannot fix.
 - Registration answers 422 for a taken email, which tells anyone which addresses have accounts. Put email confirmation in front of it if that matters.
 - The tokens are bearer tokens. Only if the app has no session or cookie-based pages, the printed instructions suggest turning Nova's session cookie off with `{use_sessions, false}` in the app's env; a dashboard with session pages next to the API needs it on.
 

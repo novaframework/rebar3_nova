@@ -55,7 +55,8 @@ validate_email(CS) ->
             case normalize_email(Email) of
                 {ok, Normalized} ->
                     CS1 = kura_changeset:put_change(CS, email, Normalized),
-                    kura_changeset:unique_constraint(CS1, email);
+                    CS2 = kura_changeset:validate_length(CS1, email, [{max, 254}]),
+                    kura_changeset:unique_constraint(CS2, email);
                 error ->
                     kura_changeset:add_error(CS, email, ~"is not valid UTF-8")
             end
