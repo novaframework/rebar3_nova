@@ -30,7 +30,8 @@
     dockerfile_runs_unprivileged/1,
     erlydtl_plugin_is_pinned/1,
     gitignore_ignores_env/1,
-    prod_database_uses_tls/1
+    prod_database_uses_tls/1,
+    positional_project_name/1
 ]).
 
 all() ->
@@ -60,7 +61,8 @@ all() ->
         dockerfile_runs_unprivileged,
         erlydtl_plugin_is_pinned,
         gitignore_ignores_env,
-        prod_database_uses_tls
+        prod_database_uses_tls,
+        positional_project_name
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -586,6 +588,13 @@ prod_database_uses_tls(_Config) ->
      || Terms <- [Generated, Fullstack]
     ].
 
+%% rebar3 hands a namespaced provider its first positional argument as the
+%% task option, so `rebar3 nova new my_app` used to crash.
+positional_project_name(_Config) ->
+    ?assertEqual("my_app", rebar3_nova_new:resolve_name([{task, "my_app"}, {kura, true}], [])),
+    ?assertEqual("named", rebar3_nova_new:resolve_name([{name, "named"}, {task, "my_app"}], [])),
+    ?assertEqual("rest", rebar3_nova_new:resolve_name([], ["rest"])),
+    ?assertError(missing_project_name, rebar3_nova_new:resolve_name([{kura, true}], [])).
 
 template_sys_configs() ->
     [

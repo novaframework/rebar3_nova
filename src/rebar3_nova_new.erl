@@ -1,7 +1,7 @@
 -module(rebar3_nova_new).
 
 -export([init/1, do/1, format_error/1]).
--export([generate_project/2, validate_flags/1]).
+-export([generate_project/2, validate_flags/1, resolve_name/2]).
 
 -define(PROVIDER, new).
 -define(DEPS, []).
@@ -53,15 +53,17 @@ format_error(Reason) ->
 %% Flag parsing
 %%======================================================================
 
+-doc """
+The project name: `--name`, else the first positional argument, which rebar3
+hands a namespaced provider as the `task` option rather than in `Args`.
+""".
+-spec resolve_name([{atom(), term()}], [string()]) -> string().
 resolve_name(Opts, Args) ->
-    case proplists:get_value(name, Opts) of
-        undefined ->
-            case Args of
-                [N | _] -> N;
-                _ -> error(missing_project_name)
-            end;
-        N ->
-            N
+    case {proplists:get_value(name, Opts), proplists:get_value(task, Opts), Args} of
+        {Name, _, _} when is_list(Name) -> Name;
+        {undefined, Name, _} when is_list(Name) -> Name;
+        {undefined, undefined, [Name | _]} -> Name;
+        _ -> error(missing_project_name)
     end.
 
 parse_flags(Opts) ->
