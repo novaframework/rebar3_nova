@@ -17,7 +17,14 @@
     template_erlydtl_provider_hooks/1,
     combined_kura_arizona_ci/1,
     kura_pgo_mutually_exclusive/1,
-    existing_dir_aborts/1
+    existing_dir_aborts/1,
+    sys_configs_are_valid_terms/1,
+    dev_logger_uses_flatlog_handler/1,
+    no_unused_nova_keys/1,
+    current_toolchain/1,
+    generated_erlang_compiles/1,
+    templates_use_current_stack/1,
+    template_sys_configs_are_valid_terms/1
 ]).
 
 all() ->
@@ -34,7 +41,14 @@ all() ->
         template_erlydtl_provider_hooks,
         combined_kura_arizona_ci,
         kura_pgo_mutually_exclusive,
-        existing_dir_aborts
+        existing_dir_aborts,
+        sys_configs_are_valid_terms,
+        dev_logger_uses_flatlog_handler,
+        no_unused_nova_keys,
+        current_toolchain,
+        generated_erlang_compiles,
+        templates_use_current_stack,
+        template_sys_configs_are_valid_terms
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -100,18 +114,38 @@ kura_flag(_Config) ->
     assert_file_exists(Name, "src/testapp_kura_repo.erl"),
     assert_file_exists(Name, "docker-compose.yml"),
 
-    RebarConfig = read_file(Name, "rebar.config"),
-    assert_contains(RebarConfig, "kura"),
+    ?assert(filelib:is_dir(filename:join([Name, "src", "migrations"]))),
+
+    Terms = consult_rebar_config(Name),
+    Deps = prop(deps, Terms),
+    ?assertEqual({kura, "~> 2.25"}, lists:keyfind(kura, 1, Deps)),
+    ?assertEqual({kura_postgres, "~> 1.1"}, lists:keyfind(kura_postgres, 1, Deps)),
+    ?assertEqual(
+        {rebar3_kura, "~> 0.16"},
+        lists:keyfind(rebar3_kura, 1, prop(project_plugins, Terms))
+    ),
+    ?assertEqual(
+        [{pre, [{compile, {erlydtl, compile}}, {compile, {kura, compile}}]}],
+        prop(provider_hooks, Terms)
+    ),
+    Erlfmt = prop(erlfmt, Terms),
+    ?assert(lists:member("src/migrations/*.erl", prop(exclude_files, Erlfmt))),
 
     AppSrc = read_file(Name, "src/testapp_kura.app.src"),
-    assert_contains(AppSrc, "kura"),
+    assert_contains(AppSrc, "kura_postgres"),
 
     SupErl = read_file(Name, "src/testapp_kura_sup.erl"),
-    assert_contains(SupErl, "testapp_kura_repo"),
+    assert_contains(SupErl, "ChildSpecs = []"),
+
+    AppErl = read_file(Name, "src/testapp_kura_app.erl"),
+    assert_contains(AppErl, "{ok, _} = kura_migrator:migrate(testapp_kura_repo)"),
 
     DevConfig = read_file(Name, "config/dev_sys.config.src"),
-    assert_contains(DevConfig, "pgo"),
+    assert_not_contains(DevConfig, "pgo"),
     assert_contains(DevConfig, "testapp_kura_dev"),
+    {ok, [DevTerms]} = file:consult(filename:join([Name, "config", "dev_sys.config.src"])),
+    #{testapp_kura_repo := #{backend := kura_backend_postgres}} =
+        prop(repos, prop(kura, DevTerms)),
 
     RepoErl = read_file(Name, "src/testapp_kura_repo.erl"),
     assert_contains(RepoErl, "kura_repo"),
@@ -141,21 +175,39 @@ arizona_flag(_Config) ->
     Flags = (default_flags())#{arizona => true},
     rebar3_nova_new:generate_project(Name, Flags),
 
-    assert_file_exists(Name, "src/views/testapp_arizona_home_view.erl"),
+    assert_file_exists(Name, "src/live/testapp_arizona_home_live.erl"),
+    assert_file_exists(Name, "src/live/testapp_arizona_layout.erl"),
     assert_file_exists(Name, "priv/assets/app.css"),
     assert_file_not_exists(Name, "src/views/testapp_arizona_main.dtl"),
+    assert_file_not_exists(Name, "src/controllers/testapp_arizona_main_controller.erl"),
 
     RebarConfig = read_file(Name, "rebar.config"),
-    assert_contains(RebarConfig, "arizona_core"),
-    assert_contains(RebarConfig, "arizona_nova"),
+    assert_contains(RebarConfig, "{arizona_nova, \"~> 0.1\"}"),
+    assert_not_contains(RebarConfig, "arizona_core"),
     assert_not_contains(RebarConfig, "erlydtl"),
 
-    Router = read_file(Name, "src/testapp_arizona_router.erl"),
-    assert_contains(Router, "arizona_nova_adapter"),
-    assert_contains(Router, "ws"),
+    Live = read_file(Name, "src/live/testapp_arizona_home_live.erl"),
+    assert_contains(Live, "arizona/include/arizona_stateful.hrl"),
+    assert_not_contains(Live, "arizona_view"),
 
-    DevConfig = read_file(Name, "config/dev_sys.config.src"),
-    assert_contains(DevConfig, "arizona_core"),
+    Router = read_file(Name, "src/testapp_arizona_router.erl"),
+    assert_not_contains(Router, "arizona_nova_adapter"),
+    assert_not_contains(Router, "main_controller"),
+
+    {ok, [DevTerms]} = file:consult(filename:join([Name, "config", "dev_sys.config.src"])),
+    ?assertEqual(undefined, prop(arizona_core, DevTerms)),
+    #{middleware_handlers := [arizona_cowboy_middleware, nova_router | _]} =
+        prop(cowboy_configuration, prop(nova, DevTerms)),
+    Routes = prop(routes, prop(arizona_nova, DevTerms)),
+    ?assertMatch(
+        {live, <<"/">>, testapp_arizona_home_live, #{layouts := [{testapp_arizona_layout, render}]}},
+        lists:keyfind(live, 1, Routes)
+    ),
+    ?assertMatch({ws, <<"/live/ws">>, _}, lists:keyfind(ws, 1, Routes)),
+    ?assertMatch(
+        {asset, <<"/assets/arizona">>, {priv_dir, arizona, "static/assets/js"}},
+        lists:keyfind(asset, 1, Routes)
+    ),
 
     ok.
 
@@ -202,7 +254,9 @@ docker_flag(_Config) ->
     assert_file_exists(Name, "Dockerfile"),
 
     Dockerfile = read_file(Name, "Dockerfile"),
-    assert_contains(Dockerfile, "erlang:28"),
+    assert_contains(Dockerfile, "FROM erlang:29 AS builder"),
+    assert_contains(Dockerfile, "FROM debian:trixie-slim"),
+    assert_contains(Dockerfile, "ca-certificates"),
     assert_contains(Dockerfile, "testapp_docker"),
     assert_contains(Dockerfile, "EXPOSE 8080"),
 
@@ -221,7 +275,9 @@ otel_flag(_Config) ->
     assert_contains(AppSrc, "opentelemetry"),
 
     AppErl = read_file(Name, "src/testapp_otel_app.erl"),
-    assert_contains(AppErl, "opentelemetry:setup()"),
+    assert_contains(AppErl, "ok = opentelemetry_nova:setup()"),
+    assert_not_contains(AppErl, "opentelemetry:setup()"),
+    assert_contains(AppSrc, "opentelemetry_nova"),
 
     DevConfig = read_file(Name, "config/dev_sys.config.src"),
     assert_contains(DevConfig, "otel_exporter_stdout"),
@@ -237,10 +293,6 @@ erlydtl_provider_hooks(_Config) ->
     Base = "testapp_hooks_base",
     rebar3_nova_new:generate_project(Base, default_flags()),
     ?assert(lists:member(Hook, consult_rebar_config(Base))),
-
-    Kura = "testapp_hooks_kura",
-    rebar3_nova_new:generate_project(Kura, (default_flags())#{kura => true}),
-    ?assert(lists:member(Hook, consult_rebar_config(Kura))),
 
     Arizona = "testapp_hooks_arizona",
     rebar3_nova_new:generate_project(Arizona, (default_flags())#{arizona => true}),
@@ -263,10 +315,7 @@ erlydtl_provider_hooks(_Config) ->
     ok.
 
 template_erlydtl_provider_hooks(_Config) ->
-    PrivDir = code:priv_dir(rebar3_nova),
-    Template = filename:join([PrivDir, "templates", "nova", "rebar.config"]),
-    {ok, Bin} = file:read_file(Template),
-    Content = binary_to_list(Bin),
+    Content = read_file(templates_dir(), "nova/rebar.config"),
     assert_contains(Content, "{provider_hooks, ["),
     assert_contains(Content, "{pre, [{compile, {erlydtl, compile}}]}"),
     ok.
@@ -278,21 +327,22 @@ combined_kura_arizona_ci(_Config) ->
 
     assert_file_exists(Name, "src/testapp_combo_repo.erl"),
     assert_file_exists(Name, "docker-compose.yml"),
-    assert_file_exists(Name, "src/views/testapp_combo_home_view.erl"),
+    assert_file_exists(Name, "src/live/testapp_combo_home_live.erl"),
     assert_file_exists(Name, "priv/assets/app.css"),
     assert_file_exists(Name, ".github/workflows/ci.yml"),
     assert_file_not_exists(Name, "src/views/testapp_combo_main.dtl"),
 
     RebarConfig = read_file(Name, "rebar.config"),
-    assert_contains(RebarConfig, "kura"),
-    assert_contains(RebarConfig, "arizona_core"),
+    assert_contains(RebarConfig, "kura_postgres"),
+    assert_contains(RebarConfig, "arizona_nova"),
     assert_not_contains(RebarConfig, "erlydtl"),
+    ?assertEqual(
+        [{pre, [{compile, {kura, compile}}]}],
+        prop(provider_hooks, consult_rebar_config(Name))
+    ),
 
-    Router = read_file(Name, "src/testapp_combo_router.erl"),
-    assert_contains(Router, "arizona_nova_adapter"),
-
-    SupErl = read_file(Name, "src/testapp_combo_sup.erl"),
-    assert_contains(SupErl, "testapp_combo_repo"),
+    AppErl = read_file(Name, "src/testapp_combo_app.erl"),
+    assert_contains(AppErl, "kura_migrator:migrate(testapp_combo_repo)"),
 
     ok.
 
@@ -311,9 +361,151 @@ existing_dir_aborts(_Config) ->
     ),
     ok.
 
+sys_configs_are_valid_terms(_Config) ->
+    Combos = [
+        #{},
+        #{kura => true},
+        #{pgo => true},
+        #{arizona => true},
+        #{lfe => true},
+        #{otel => true},
+        #{kura => true, arizona => true, otel => true},
+        #{lfe => true, arizona => true}
+    ],
+    [
+        assert_sys_configs_parse("testapp_cfg_" ++ integer_to_list(N), Extra)
+     || {N, Extra} <- lists:enumerate(Combos)
+    ],
+    ok.
+
+assert_sys_configs_parse(Name, Extra) ->
+    rebar3_nova_new:generate_project(Name, maps:merge(default_flags(), Extra)),
+    [
+        ?assertMatch({ok, [[_ | _]]}, consult_env_substituted(Name ++ "/config/" ++ File), File)
+     || File <- ["dev_sys.config.src", "prod_sys.config.src"]
+    ].
+
+dev_logger_uses_flatlog_handler(_Config) ->
+    Name = "testapp_logger",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    {ok, [Terms]} = file:consult(filename:join([Name, "config", "dev_sys.config.src"])),
+    Kernel = prop(kernel, Terms),
+    ?assert(lists:all(fun is_tuple/1, Kernel)),
+    ?assertMatch(
+        [{handler, default, logger_std_h, #{formatter := {flatlog, _}}}],
+        prop(logger, Kernel)
+    ).
+
+no_unused_nova_keys(_Config) ->
+    Name = "testapp_nova_keys",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    [
+        assert_not_contains(read_file(Name, "config/" ++ File), "dev_mode")
+     || File <- ["dev_sys.config.src", "prod_sys.config.src"]
+    ].
+
+current_toolchain(_Config) ->
+    Name = "testapp_toolchain",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    ?assertEqual("erlang 29.1.2\nrebar 3.27.0\n", read_file(Name, ".tool-versions")),
+    GitIgnore = string:split(read_file(Name, ".gitignore"), "\n", all),
+    ?assertNot(lists:member("_*", GitIgnore)),
+    ?assert(lists:member("_build", GitIgnore)),
+    Terms = consult_rebar_config(Name),
+    ?assertEqual({nova, "~> 0.18"}, lists:keyfind(nova, 1, prop(deps, Terms))),
+    ?assertEqual(
+        {rebar3_nova, "~> 0.13"},
+        lists:keyfind(rebar3_nova, 1, prop(project_plugins, Terms))
+    ),
+    TestProfile = prop(test, prop(profiles, Terms)),
+    ?assertEqual([{meck, "1.2.0"}], prop(deps, TestProfile)).
+
+generated_erlang_compiles(_Config) ->
+    Name = "testapp_compiles",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{kura => true, otel => true}),
+    Files = filelib:wildcard(Name ++ "/src/**/*.erl"),
+    ?assertNotEqual([], Files),
+    [?assertMatch({ok, _, _}, compile:file(File, [binary, return_errors]), File) || File <- Files].
+
+templates_use_current_stack(_Config) ->
+    Dir = templates_dir(),
+    Files = filelib:wildcard("nova*/*", Dir) ++ filelib:wildcard("nova*/.*", Dir),
+    [
+        ?assertEqual(nomatch, string:find(read_file(Dir, File), Stale), {File, Stale})
+     || File <- Files,
+        Stale <- [
+            "arizona_view",
+            "arizona_core",
+            "Taure/arizona_nova",
+            "{meck, \"1.1.0\"}",
+            "rebar3_nova.git"
+        ]
+    ],
+    [
+        ?assertEqual(nomatch, string:find(read_file(Dir, File), "dev_mode"), File)
+     || File <- template_sys_configs()
+    ],
+    {ok, Fullstack} = file:consult(Dir ++ "/nova_fullstack/rebar.config"),
+    Deps = prop(deps, Fullstack),
+    ?assertEqual({kura, "~> 2.25"}, lists:keyfind(kura, 1, Deps)),
+    ?assertEqual({kura_postgres, "~> 1.1"}, lists:keyfind(kura_postgres, 1, Deps)),
+    ?assertEqual({arizona_nova, "~> 0.1"}, lists:keyfind(arizona_nova, 1, Deps)),
+    GitIgnore = string:split(read_file(Dir, "nova/.gitignore"), "\n", all),
+    ?assertNot(lists:member("_*", GitIgnore)).
+
+template_sys_configs_are_valid_terms(_Config) ->
+    [
+        ?assert(lists:all(fun is_tuple/1, prop(kernel, render_template_config(File))), File)
+     || File <- template_sys_configs()
+    ],
+    Terms = render_template_config("nova_fullstack/dev_sys.config.src"),
+    #{app_repo := #{backend := kura_backend_postgres}} =
+        prop(repos, prop(kura, Terms)),
+    ?assertMatch(
+        [{live, <<"/">>, app_home_live, #{layouts := [{app_layout, render}]}} | _],
+        prop(routes, prop(arizona_nova, Terms))
+    ).
+
+template_sys_configs() ->
+    [
+        "nova/dev_sys.config.src",
+        "nova/prod_sys.config.src",
+        "nova_lfe/dev_sys.config.src",
+        "nova_fullstack/dev_sys.config.src",
+        "nova_fullstack/prod_sys.config.src"
+    ].
+
+-spec render_template_config(string()) -> dynamic().
+render_template_config(File) ->
+    {ok, Bin} = file:read_file(templates_dir() ++ "/" ++ File),
+    {ok, [Terms]} = consult_string(binary:replace(Bin, ~"{{name}}", ~"app", [global])),
+    Terms.
+
 %%======================================================================
 %% Helpers
 %%======================================================================
+
+-spec prop(atom(), dynamic()) -> dynamic().
+prop(Key, Terms) ->
+    proplists:get_value(Key, Terms).
+
+templates_dir() ->
+    case code:priv_dir(rebar3_nova) of
+        Dir when is_list(Dir) -> Dir ++ "/templates"
+    end.
+
+%% relx substitutes ${VAR} and ${VAR:-Default} before parsing a .src config.
+-spec consult_env_substituted(string()) -> {ok, dynamic()} | {error, term()}.
+consult_env_substituted(Path) ->
+    {ok, Bin} = file:read_file(Path),
+    consult_string(Bin).
+
+-spec consult_string(binary()) -> {ok, dynamic()} | {error, term()}.
+consult_string(Bin) ->
+    Substituted = re:replace(Bin, "\\$\\{[A-Z_]+(:-([^}]*))?\\}", "\\2", [global, {return, binary}]),
+    Path = "substituted.config",
+    ok = file:write_file(Path, Substituted),
+    file:consult(Path).
 
 default_flags() ->
     #{
@@ -334,10 +526,12 @@ assert_file_not_exists(Base, RelPath) ->
     Path = filename:join(Base, RelPath),
     ?assertNot(filelib:is_regular(Path), #{msg => "Expected file to not exist", path => Path}).
 
+-spec consult_rebar_config(string()) -> dynamic().
 consult_rebar_config(Base) ->
     {ok, Terms} = file:consult(filename:join(Base, "rebar.config")),
     Terms.
 
+-spec read_file(string(), string()) -> string().
 read_file(Base, RelPath) ->
     Path = filename:join(Base, RelPath),
     {ok, Bin} = file:read_file(Path),
