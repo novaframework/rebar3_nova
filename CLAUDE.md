@@ -32,7 +32,7 @@ rebar3 nova release          # Build release (regenerates OpenAPI if schemas exi
 - `rebar3_nova_gen_controller.erl` — controller scaffolding
 - `rebar3_nova_gen_resource.erl` — full resource scaffolding (controller + schema + routes)
 - `rebar3_nova_gen_test.erl` — CT test suite generation
-- `rebar3_nova_gen_auth.erl` - nova_auth token auth scaffolding from `priv/gen_auth/*.erl.src`
+- `rebar3_nova_gen_auth.erl` - email/password auth scaffolding (9 files)
 - `rebar3_nova_openapi.erl` - OpenAPI 3.0.3 spec (outputs to priv/assets/ unless --output)
 - `rebar3_nova_middleware.erl` — middleware/plugin chain display
 - `rebar3_nova_config.erl` — Nova config display

@@ -90,8 +90,9 @@ $ rebar3 nova gen_resource --name products
 ===>         {"/products/:id", fun myapp_products_controller:show/1, #{methods => [get]}}
 ===>     ]},
 ===>   #{prefix => "",
-===>     %% Placeholder: require_bearer/1 and myapp_body_limit come from
-===>     %% `rebar3 nova gen_auth`; use your own if you have them.
+===>     %% Placeholders: replace require_bearer/1 with your security function
+===>     %% and myapp_body_limit with a plugin that refuses large bodies. Until
+===>     %% both exist, these routes fail closed.
 ===>     security => fun myapp_auth_security:require_bearer/1,
 ===>     %% Plugins run before security, so the group sets its own instead of
 ===>     %% inheriting a global body decoder that reads any size of body.
@@ -107,7 +108,7 @@ $ rebar3 nova gen_resource --name products
 ===>     ]}
 ```
 
-Create, update and delete come in a group of their own behind a `security` function, so pasting the snippet does not make the writes public. Until you replace the placeholder or run `gen_auth`, those routes fail closed. The group lists its own plugins, because Nova runs pre-request plugins before security: an inherited global body decoder would read a body of any size from a request without a token. A group's plugins replace the global ones, so `nova_json_schemas` is listed again when a route has a `json_schema`.
+Create, update and delete come in a group of their own behind a `security` function, so pasting the snippet does not make the writes public. Until you replace the placeholders with your own security function and body limit plugin, those routes fail closed. The group lists its own plugins, because Nova runs pre-request plugins before security: an inherited global body decoder would read a body of any size from a request without a token. A group's plugins replace the global ones, so `nova_json_schemas` is listed again when a route has a `json_schema`.
 
 **Options:** Same as `gen_controller`.
 
@@ -130,35 +131,6 @@ $ rebar3 nova gen_test --name users
 
 The paths, prefixes included, come from the compiled routes; with no routes for the controller yet, the suite assumes the `gen_resource` routes under `/{name}`. The generated suite starts `inets` and the application in `init_per_suite`, reads the port from the `nova` `cowboy_configuration` it runs with, uses `1` for path bindings and sends `{"name": "test"}` as the body, so it passes against the generated controller. Adapt the expectations as you implement the actions.
 
-### `nova gen_auth` - Generate token authentication
-
-Scaffolds email/password authentication with bearer tokens on [nova_auth](https://hex.pm/packages/nova_auth) 0.2 and Kura:
-
-- `src/myapp_auth.erl`: the `nova_auth` config module
-- `src/schemas/myapp_user.erl`, `src/schemas/myapp_user_token.erl`: Kura schemas; the `rebar3_kura` compile hook writes the migration
-- `src/myapp_accounts.erl`: register, authenticate, issue and revoke tokens
-- `src/myapp_auth_security.erl`: `require_bearer/1` for route groups
-- `src/controllers/myapp_auth_controller.erl`: `register/1`, `login/1`, `logout/1`, `me/1`
-- `src/plugins/myapp_rate_limit.erl`: rate limiting for login and registration
-- `src/plugins/myapp_body_limit.erl`: refuses request bodies over `max_bytes` (default 65536) before they are read
-- `test/myapp_auth_SUITE.erl`
-
-```
-$ rebar3 nova gen_auth
-```
-
-It then prints the deps (`nova_auth`, `kura`, `kura_postgres`), the `rebar3_kura` hook and the routes to add. The project needs a Kura repo named `myapp_repo`, as `rebar3 nova new --kura` creates. Pin `{nova_auth, "~> 0.2.0"}`: the rate-limit plugin sets nova_auth 0.2's `key_fun` option, which later versions reject.
-
-- Registration takes `email`, `password` and `password_confirmation`. The changesets drop the plaintext from the changeset's changes and params once hashed, valid or not, so it does not reach a log in `{error, Changeset}`.
-- `email_changeset/2` (used by `nova_auth_accounts:change_identity/4`) resets `confirmed_at` when the address really changes; `password_changeset/2` hashes the new password.
-- The token schema has `family_id` and `used_at`, which `nova_auth_refresh` needs.
-- The public route group runs `myapp_rate_limit`, then `myapp_body_limit`, then `nova_request_plugin`, so a flood or an oversized body (or a chunked one, which has no length up front) is refused with 429 or 413 before anything reads it. The bearer group sets `plugins => []`: Nova runs pre-request plugins before security, so a global body-decoding plugin would read the body of a request that has no token at all. The instructions print a protected group for your own routes with `myapp_body_limit` before `nova_request_plugin`, for the same reason. The 413 reply sets no `connection` header, which HTTP/2 forbids.
-- `require_bearer/1` reads the `Authorization` header bytewise (anything but a well-formed `Bearer <b64token>` is a 401, never a crash) and puts only the user's `id` and `email` in `auth_data`, never the password hash.
-- The rate limit keys on the client address: one bucket per IPv4 address and per IPv6 /64, with IPv4-mapped addresses unmapped. The address is the TCP peer unless the peer is in `{trusted_proxies, [...]}` in the app env (address tuples or `{Address, PrefixLength}` ranges, default `[]`); then it is the right-most `x-forwarded-for` address that is not a trusted proxy. Hops may carry a port (`192.0.2.1:8080`, `[2001:db8::1]:443`) and empty hops are skipped. A mistyped entry, such as a string or a prefix length out of range, raises `invalid_trusted_proxy` on the first request instead of being ignored. Once nova_auth 0.3 is released, its `nova_auth_rate_limit:client_ip/1` replaces this code.
-- `login/1` also allows 20 attempts per normalised (NFC, lowercased) email in 15 minutes, whatever the address, so rotating addresses does not buy unlimited guesses. The limit is generous so that failing logins in someone's name hardly locks them out.
-- Registration answers 422 for a taken email, which tells anyone which addresses have accounts. Put email confirmation in front of it if that matters.
-- The tokens are bearer tokens, so the printed instructions turn Nova's session cookie off with `{use_sessions, false}` in the app's env.
-
 ### `nova openapi` — Generate OpenAPI 3.0.3 spec
 
 Generates an OpenAPI 3.0.3 JSON specification from compiled controller routes and any JSON schemas found in `priv/schemas/`. Static files, error pages and inline funs are left out.
@@ -167,7 +139,7 @@ Generates an OpenAPI 3.0.3 JSON specification from compiled controller routes an
 $ rebar3 nova openapi
 ===> OpenAPI spec written to /path/to/myapp/priv/assets/openapi.json
 
-$ rebar3 nova openapi --prefix /api --output priv/assets/openapi.json
+$ rebar3 nova openapi --prefix /api --output docs/openapi.json
 $ rebar3 nova openapi --title "My API" --api-version 1.0.0
 ```
 
