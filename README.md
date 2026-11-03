@@ -16,7 +16,9 @@ Add the plugin from Hex to your global rebar config (`~/.config/rebar3/rebar.con
 
 Or run the installer, which adds the same line and keeps the rest of the file as it is:
 
-    $ bash -c "$(curl -fsSL https://raw.githubusercontent.com/novaframework/rebar3_nova/master/install.sh)"
+    $ bash -c "$(curl -fsSL https://raw.githubusercontent.com/novaframework/rebar3_nova/v0.14.0/install.sh)"
+
+The installer comes from a release tag, as does the `install.escript` it runs (`REBAR3_NOVA_REF` picks another tag). If rebar3 is missing it offers to install rebar3 3.27.0, downloaded into a private temporary directory and run only when its sha256 matches the one GitHub publishes for that release.
 
 To track unreleased changes, use the git source instead:
 

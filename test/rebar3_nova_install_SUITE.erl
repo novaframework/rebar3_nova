@@ -8,7 +8,9 @@
     creates_config_with_hex_plugin/1,
     keeps_comments_when_adding_to_plugins/1,
     adds_plugins_to_existing_config/1,
-    leaves_existing_nova_plugin_alone/1
+    leaves_existing_nova_plugin_alone/1,
+    installer_runs_only_a_verified_rebar3/1,
+    installer_is_fetched_from_a_tag/1
 ]).
 
 all() ->
@@ -16,7 +18,9 @@ all() ->
         creates_config_with_hex_plugin,
         keeps_comments_when_adding_to_plugins,
         adds_plugins_to_existing_config,
-        leaves_existing_nova_plugin_alone
+        leaves_existing_nova_plugin_alone,
+        installer_runs_only_a_verified_rebar3,
+        installer_is_fetched_from_a_tag
     ].
 
 creates_config_with_hex_plugin(Config) ->
@@ -56,6 +60,31 @@ leaves_existing_nova_plugin_alone(Config) ->
     write_global_config(Home, Existing),
     install(Home),
     ?assertEqual({ok, list_to_binary(Existing)}, file:read_file(global_config(Home))).
+
+%% The old installer ran `./rebar3` from the working directory after an
+%% unverified download, so a planted or tampered file ran instead.
+installer_runs_only_a_verified_rebar3(_Config) ->
+    Escript = repo_file("install.escript"),
+    [
+        ?assertEqual(nomatch, string:find(Escript, Bad), Bad)
+     || Bad <- ["wget", "\"./rebar3", "s3.amazonaws"]
+    ],
+    ?assertMatch(
+        {match, _}, re:run(Escript, "-define\\(REBAR3_SHA256, \"[0-9a-f]{64}\"\\)")
+    ),
+    ?assertNotEqual(nomatch, string:find(Escript, "{verify, verify_peer}")),
+    ?assertNotEqual(nomatch, string:find(Escript, "file:make_dir(Dir)")).
+
+installer_is_fetched_from_a_tag(_Config) ->
+    Sh = repo_file("install.sh"),
+    ?assertNotEqual(nomatch, string:find(Sh, "curl -fsSL")),
+    ?assertMatch({match, _}, re:run(Sh, "REBAR3_NOVA_REF:-v[0-9]+\\.[0-9]+\\.[0-9]+")),
+    ?assertEqual(nomatch, string:find(Sh, "/master/")),
+    ?assertEqual(nomatch, string:find(repo_file("README.md"), "rebar3_nova/master/install.sh")).
+
+repo_file(Name) ->
+    {ok, Bin} = file:read_file(filename:join([lib_dir(), "..", "..", "..", "..", Name])),
+    binary_to_list(Bin).
 
 home(Config, Name) ->
     Home = filename:join(?config(priv_dir, Config), Name),
