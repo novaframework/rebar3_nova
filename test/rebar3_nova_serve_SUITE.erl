@@ -2,6 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
+-include_lib("nova/include/nova_router.hrl").
 
 -export([all/0, init_per_testcase/2, end_per_testcase/2]).
 -export([
@@ -11,11 +12,16 @@
     found_watcher_is_not_a_problem/1,
     router_edit_reloads_routes/1,
     prefixed_app_keeps_its_prefix/1,
-    other_modules_leave_routes_alone/1
+    other_modules_leave_routes_alone/1,
+    nova_apps_options_survive_a_reload/1,
+    nested_nova_apps_options_survive_a_reload/1,
+    deny/1
 ]).
 
 -define(APP, rebar3_nova).
 -define(ROUTER, rebar3_nova_test_router).
+-define(BOOT, rebar3_nova_serve_boot).
+-define(PARENT, rebar3_nova_serve_parent).
 
 all() ->
     [
@@ -25,7 +31,9 @@ all() ->
         found_watcher_is_not_a_problem,
         router_edit_reloads_routes,
         prefixed_app_keeps_its_prefix,
-        other_modules_leave_routes_alone
+        other_modules_leave_routes_alone,
+        nova_apps_options_survive_a_reload,
+        nested_nova_apps_options_survive_a_reload
     ].
 
 init_per_testcase(_Case, Config) ->
@@ -37,6 +45,9 @@ init_per_testcase(_Case, Config) ->
 
 end_per_testcase(_Case, _Config) ->
     application:unset_env(?APP, router_module),
+    application:unset_env(nova, bootstrap_application),
+    application:unset_env(?BOOT, nova_apps),
+    application:unset_env(?PARENT, nova_apps),
     _ = persistent_term:erase(nova_dispatch),
     _ = persistent_term:erase(nova_apps),
     ok.
@@ -95,3 +106,36 @@ other_modules_leave_routes_alone(_Config) ->
     ?ROUTER:set_routes([]),
     ?assertEqual([], rebar3_nova_serve:reload_routes(test_controller)),
     ?assertMatch({ok, _, _}, nova_router:lookup_url('_', ~"/old", ~"GET")).
+
+%% A sub-app's security and plugins come from its nova_apps entry, not its
+%% router; reloading with the prefix alone dropped them.
+nova_apps_options_survive_a_reload(_Config) ->
+    application:set_env(nova, bootstrap_application, ?BOOT),
+    application:set_env(?BOOT, nova_apps, [{?APP, sub_app_options()}]),
+    assert_reload_keeps(sub_app_options()).
+
+nested_nova_apps_options_survive_a_reload(_Config) ->
+    application:set_env(nova, bootstrap_application, ?BOOT),
+    application:set_env(?BOOT, nova_apps, [?PARENT]),
+    application:set_env(?PARENT, nova_apps, [{?APP, sub_app_options()}]),
+    assert_reload_keeps(sub_app_options()).
+
+deny(_Req) ->
+    false.
+
+sub_app_options() ->
+    #{
+        prefix => "/admin",
+        secure => fun ?MODULE:deny/1,
+        plugin_strategy => {override, [{pre_request, nova_request_plugin, #{}}]}
+    }.
+
+assert_reload_keeps(Options) ->
+    ?ROUTER:set_routes([#{routes => [{"/a", fun test_controller:a/1, #{methods => [get]}}]}]),
+    _ = nova_router:compile([{?APP, Options}]),
+    ?ROUTER:set_routes([#{routes => [{"/b", fun test_controller:b/1, #{methods => [get]}}]}]),
+    ?assertEqual([?APP], rebar3_nova_serve:reload_routes(?ROUTER)),
+    {ok, _, #nova_handler_value{secure = Secure, plugins = Plugins}} =
+        nova_router:lookup_url('_', ~"/admin/b", ~"GET"),
+    ?assertEqual(fun ?MODULE:deny/1, Secure),
+    ?assertEqual([{pre_request, [{fun nova_request_plugin:pre_request/4, #{}}]}], Plugins).

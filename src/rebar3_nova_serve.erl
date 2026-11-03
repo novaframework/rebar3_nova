@@ -233,7 +233,9 @@ load(ModuleName, Filename, Binary) ->
 
 -doc """
 Re-register the routes of every compiled application whose router is
-`Module`, so an edited router takes effect without a restart.
+`Module`, so an edited router takes effect without a restart. An application
+from `nova_apps` keeps the options of its entry there. Only the default
+dispatch table is refreshed: applications on listeners of their own are not.
 """.
 -spec reload_routes(module()) -> [atom()].
 reload_routes(Module) ->
@@ -253,9 +255,50 @@ compiled_apps() ->
 
 reload_app(App, Prefix) ->
     ok = nova_router:remove_application(App),
-    _ = nova_router:compile([{App, prefix_options(Prefix)}]),
+    _ = nova_router:compile([{App, app_options(App, Prefix)}]),
     rebar_api:info("Reloaded routes for ~p", [App]),
     App.
+
+%% An app listed in nova_apps is compiled with the options of its entry there
+%% (prefix, secure, plugins, plugin_strategy, ...), found the way Nova
+%% resolves nested nova_apps: depth first from the bootstrap application.
+app_options(App, Prefix) ->
+    case application:get_env(nova, bootstrap_application) of
+        {ok, Bootstrap} when is_atom(Bootstrap), Bootstrap =/= App ->
+            case declared_options(App, nova_apps(Bootstrap), [Bootstrap]) of
+                {found, Options} -> Options;
+                {not_found, _Seen} -> prefix_options(Prefix)
+            end;
+        _ ->
+            prefix_options(Prefix)
+    end.
+
+declared_options(_App, [], Seen) ->
+    {not_found, Seen};
+declared_options(App, [Entry | Rest], Seen) ->
+    case nova_app_entry(Entry) of
+        {App, Options} ->
+            {found, Options};
+        {Name, _Options} ->
+            case lists:member(Name, Seen) of
+                true ->
+                    declared_options(App, Rest, Seen);
+                false ->
+                    case declared_options(App, nova_apps(Name), [Name | Seen]) of
+                        {found, _} = Found -> Found;
+                        {not_found, Seen1} -> declared_options(App, Rest, Seen1)
+                    end
+            end
+    end.
+
+nova_app_entry({Name, Options}) when is_atom(Name), is_map(Options) -> {Name, Options};
+nova_app_entry(Name) when is_atom(Name) -> {Name, #{}}.
+
+nova_apps(App) ->
+    case application:get_env(App, nova_apps, []) of
+        Apps when is_list(Apps) -> Apps;
+        _ -> []
+    end.
 
 prefix_options("/") -> #{};
 prefix_options("") -> #{};
