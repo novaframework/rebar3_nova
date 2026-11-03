@@ -435,11 +435,6 @@ generate_app(Name, Flags) ->
             true -> ["    ok = opentelemetry_nova:setup(),\n"];
             false -> []
         end,
-    Migrate =
-        case maps:get(kura, Flags) of
-            true -> ["    {ok, _} = kura_migrator:migrate(", Name, "_repo),\n"];
-            false -> []
-        end,
     Content = [
         "-module(",
         Name,
@@ -448,7 +443,6 @@ generate_app(Name, Flags) ->
         "-export([start/2, stop/1]).\n\n",
         "start(_StartType, _StartArgs) ->\n",
         Otel,
-        Migrate,
         "    ",
         Name,
         "_sup:start_link().\n\n",
@@ -1001,6 +995,16 @@ generate_kura_repo(Name) ->
         Name,
         "_repo).\n\n",
         "-behaviour(kura_repo).\n\n",
+        "%% Migrations do not run at boot, where nodes starting together would race\n",
+        "%% on them. Run them as a release step, once per deploy, on the running node:\n",
+        "%%   bin/",
+        Name,
+        " eval 'kura_migrator:migrate(",
+        Name,
+        "_repo).'\n",
+        "%% In development, call kura_migrator:migrate(",
+        Name,
+        "_repo) in rebar3 shell.\n\n",
         "-export([otp_app/0]).\n\n",
         "otp_app() -> ",
         Name,

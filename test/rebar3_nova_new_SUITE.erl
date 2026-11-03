@@ -33,7 +33,8 @@
     prod_database_uses_tls/1,
     positional_project_name/1,
     release_requires_the_cookie/1,
-    pgo_prod_pool_uses_tls/1
+    pgo_prod_pool_uses_tls/1,
+    migrations_are_a_release_step/1
 ]).
 
 all() ->
@@ -66,7 +67,8 @@ all() ->
         prod_database_uses_tls,
         positional_project_name,
         release_requires_the_cookie,
-        pgo_prod_pool_uses_tls
+        pgo_prod_pool_uses_tls,
+        migrations_are_a_release_step
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -156,7 +158,7 @@ kura_flag(_Config) ->
     assert_contains(SupErl, "ChildSpecs = []"),
 
     AppErl = read_file(Name, "src/testapp_kura_app.erl"),
-    assert_contains(AppErl, "{ok, _} = kura_migrator:migrate(testapp_kura_repo)"),
+    assert_not_contains(AppErl, "kura_migrator"),
 
     DevConfig = read_file(Name, "config/dev_sys.config.src"),
     assert_not_contains(DevConfig, "pgo"),
@@ -366,7 +368,7 @@ combined_kura_arizona_ci(_Config) ->
     ),
 
     AppErl = read_file(Name, "src/testapp_combo_app.erl"),
-    assert_contains(AppErl, "kura_migrator:migrate(testapp_combo_repo)"),
+    assert_not_contains(AppErl, "kura_migrator"),
 
     ok.
 
@@ -633,6 +635,21 @@ release_requires_the_cookie(_Config) ->
     assert_contains(Refused, "RELEASE_COOKIE is not set"),
     ?assertMatch({1, _}, source_hook(Hook, [{"RELEASE_COOKIE", ""}])),
     ?assertEqual({0, ""}, source_hook(Hook, [{"RELEASE_COOKIE", "s3cret"}])).
+
+%% Nodes that boot together would race on migrate-at-start.
+migrations_are_a_release_step(_Config) ->
+    Name = "testapp_migrations",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{kura => true}),
+    assert_not_contains(read_file(Name, "src/testapp_migrations_app.erl"), "kura_migrator"),
+    assert_contains(
+        read_file(Name, "src/testapp_migrations_repo.erl"),
+        "bin/testapp_migrations eval 'kura_migrator:migrate(testapp_migrations_repo).'"
+    ),
+    assert_not_contains(read_file(templates_dir(), "nova_fullstack/app.erl"), "kura_migrator"),
+    assert_contains(
+        read_file(templates_dir(), "nova_fullstack/repo.erl"),
+        "bin/{{name}} eval 'kura_migrator:migrate({{name}}_repo).'"
+    ).
 
 %% pgo hands ssl_options straight to ssl:connect/2, which since OTP 26
 %% refuses verify_peer without a trust store and checks the host name only

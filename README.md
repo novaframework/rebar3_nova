@@ -45,7 +45,7 @@ Then just call your plugin directly in an existing application:
 
 | Flag | Adds |
 |------|------|
-| `--kura` | `kura` + `kura_postgres`, a repo module, the `{kura, compile}` migration hook, a `{kura, [{repos, ...}]}` config and a `docker-compose.yml` with PostgreSQL. Migrations run when the application starts. |
+| `--kura` | `kura` + `kura_postgres`, a repo module, the `{kura, compile}` migration hook, a `{kura, [{repos, ...}]}` config and a `docker-compose.yml` with PostgreSQL. Migrations are a release step, not run at boot (below). |
 | `--pgo` | `pgo` with a `{pgo, [{pools, ...}]}` config (not together with `--kura`) |
 | `--arizona` | `arizona_nova`, a live page at `/` with a layout, and the `arizona_nova` routes and middleware chain in the configs. Arizona needs OTP 29. |
 | `--otel` | OpenTelemetry deps and `opentelemetry_nova:setup()` at start |
@@ -53,7 +53,7 @@ Then just call your plugin directly in an existing application:
 | `--ci` | A GitHub Actions workflow |
 | `--docker` | A multi-stage `Dockerfile` (OTP 29 builder, Debian trixie runtime) |
 
-With `--kura`, and in `nova_fullstack`, `start/2` runs `kura_migrator:migrate/1`. Nodes that boot at the same time race on it, so for a multi-node deploy run the migrations as a release step instead.
+With `--kura`, and in `nova_fullstack`, the application does not migrate when it starts, so nodes that boot together do not race. Run the migrations once per deploy on the running node, `bin/my_app eval 'kura_migrator:migrate(my_app_repo).'`, or call `kura_migrator:migrate(my_app_repo)` in `rebar3 shell` during development; the generated repo module says the same.
 
 Releases keep distribution private by default: `config/vm.args.src` names the node `my_app@localhost`, binds distribution to `127.0.0.1` and takes the cookie from the `RELEASE_COOKIE` environment variable. `RELEASE_COOKIE` is required: a `pre_start` hook (`rel/hooks/require_cookie`, wired through `extended_start_script_hooks`) makes `bin/my_app start`, `daemon`, `foreground` and `console` exit with an error when it is unset or empty. Set it to the same secret on every node, e.g. `export RELEASE_COOKIE="$(openssl rand -hex 32)"` once, stored in your secret manager; `ping`, `stop`, `remote_console` and `rpc` read it too. For a cluster, also switch to `-name my_app@<host>` and drop the `inet_dist_use_interface` line. Keep `-setcookie ${RELEASE_COOKIE}` the last line of the file: an empty value there ends the arguments instead of taking the next one as the cookie.
 
