@@ -18,7 +18,13 @@
     summarize_with_errors/1,
     summarize_warnings_only/1,
     summarize_strict_promotes_warnings/1,
-    summarize_strict_clean/1
+    summarize_strict_clean/1,
+    config_json_lib_is_read_from_the_bootstrap_app/1,
+    config_raw_otp_json_is_an_error/1,
+    config_json_lib_under_nova_warns/1,
+    config_session_manager_default_is_ok/1,
+    config_session_backend_warns/1,
+    config_sessions_disabled/1
 ]).
 
 all() ->
@@ -36,7 +42,13 @@ all() ->
         summarize_with_errors,
         summarize_warnings_only,
         summarize_strict_promotes_warnings,
-        summarize_strict_clean
+        summarize_strict_clean,
+        config_json_lib_is_read_from_the_bootstrap_app,
+        config_raw_otp_json_is_an_error,
+        config_json_lib_under_nova_warns,
+        config_session_manager_default_is_ok,
+        config_session_backend_warns,
+        config_sessions_disabled
     ].
 
 %%======================================================================
@@ -112,3 +124,51 @@ summarize_strict_promotes_warnings(_Config) ->
 summarize_strict_clean(_Config) ->
     %% --strict with zero warnings and zero errors is still ok.
     ?assertEqual(ok, rebar3_nova_doctor:summarize({5, 0, 0, true})).
+
+%%======================================================================
+%% config_findings/3
+%%======================================================================
+
+config_json_lib_is_read_from_the_bootstrap_app(_Config) ->
+    Config = [{nova, [{bootstrap_application, blog}]}, {blog, [{json_lib, my_json}]}],
+    [Json | _] = rebar3_nova_doctor:config_findings(Config, blog, ok),
+    ?assertEqual("json_lib = my_json", lists:flatten(element(2, Json))),
+    ?assertEqual([], [F || F <- findings(Config, ok), element(1, F) =/= ok]).
+
+config_raw_otp_json_is_an_error(_Config) ->
+    Config = [{nova, [{bootstrap_application, blog}]}, {blog, [{json_lib, json}]}],
+    ?assertMatch([{error, _, _} | _], findings(Config, raw_json_unsupported)),
+    ?assertMatch([{error, _, _} | _], findings(Config, missing)),
+    ?assertMatch([{error, _, _} | _], findings(Config, incomplete)),
+    ?assertMatch([{ok, _} | _], findings(Config, ok)).
+
+config_json_lib_under_nova_warns(_Config) ->
+    Config = [{nova, [{bootstrap_application, blog}, {json_lib, json}]}],
+    ?assertMatch([{warn, "json_lib is set under nova", _}], warnings(Config)).
+
+config_session_manager_default_is_ok(_Config) ->
+    Config = [{nova, [{bootstrap_application, blog}]}],
+    ?assertEqual([], warnings(Config)),
+    ?assert(lists:member("session_manager = nova_session_ets", ok_messages(Config))).
+
+config_session_backend_warns(_Config) ->
+    Config = [{nova, [{bootstrap_application, blog}, {session_backend, ets}]}],
+    ?assertMatch([{warn, "session_backend is not a Nova setting", _}], warnings(Config)).
+
+config_sessions_disabled(_Config) ->
+    Config = [{nova, [{bootstrap_application, blog}]}, {blog, [{use_sessions, false}]}],
+    ?assertEqual([], warnings(Config)),
+    ?assert(
+        lists:any(
+            fun(M) -> string:find(M, "sessions disabled") =/= nomatch end, ok_messages(Config)
+        )
+    ).
+
+findings(Config, JsonStatus) ->
+    rebar3_nova_doctor:config_findings(Config, blog, JsonStatus).
+
+warnings(Config) ->
+    [F || F <- findings(Config, ok), element(1, F) =/= ok].
+
+ok_messages(Config) ->
+    [lists:flatten(Msg) || {ok, Msg} <- findings(Config, ok)].

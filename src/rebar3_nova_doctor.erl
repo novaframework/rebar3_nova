@@ -11,7 +11,8 @@
 -export([
     summarize/1,
     section_status/1,
-    parse_csv/1
+    parse_csv/1,
+    config_findings/3
 ]).
 -endif.
 
@@ -147,7 +148,8 @@ check_project(State) ->
                     io_lib:format("bootstrap_application = ~p (project app is ~s)", [Other, AppName]),
                     "Usually these should match"}
         end,
-    Router = list_to_atom(lists:flatten(io_lib:format("~s_router", [AppName]))),
+    _ = application:load(AppName),
+    Router = rebar3_nova_utils:router_module(AppName),
     code:ensure_loaded(Router),
     RouterFinding =
         case erlang:function_exported(Router, routes, 1) of
@@ -186,20 +188,24 @@ check_app_src(State, AppName) ->
     end.
 
 check_config(State) ->
+    rebar_paths:set_paths([deps, plugins], State),
+    AppName = rebar3_nova_utils:get_app_name(State),
     Config = rebar3_nova_utils:load_sys_config(State),
-    NovaConfig = proplists:get_value(nova, Config, []),
-    JsonLib = proplists:get_value(json_lib, NovaConfig, thoas),
-    JsonFinding =
-        case JsonLib of
-            json ->
-                {ok, "json_lib = json (OTP built-in)"};
-            thoas ->
-                {warn, "json_lib defaults to thoas",
-                    "Set {json_lib, json} in sys.config to use OTP 27+ built-in json module"};
-            Other ->
-                {warn, io_lib:format("json_lib = ~p", [Other]),
-                    "Prefer OTP `json` module on OTP 27+"}
-        end,
+    Bootstrap = bootstrap_app(Config, AppName),
+    JsonLib = proplists:get_value(json_lib, app_env(Config, Bootstrap), thoas),
+    config_findings(Config, AppName, json_lib_status(JsonLib)).
+
+-doc """
+Findings for a sys.config. `json_lib` and `use_sessions` are read from the
+bootstrap application's env, as `nova:get_env/2` does; `session_manager`
+and `cowboy_configuration` from `nova`'s.
+""".
+-spec config_findings([{atom(), term()}], atom(), json_lib_status()) -> [finding()].
+config_findings(Config, AppName, JsonStatus) ->
+    NovaConfig = app_env(Config, nova),
+    Bootstrap = bootstrap_app(Config, AppName),
+    BootstrapConfig = app_env(Config, Bootstrap),
+    JsonLib = proplists:get_value(json_lib, BootstrapConfig, thoas),
     Cowboy = proplists:get_value(cowboy_configuration, NovaConfig, #{port => 8080}),
     CowboyFinding =
         case maps:get(port, Cowboy, undefined) of
@@ -210,19 +216,105 @@ check_config(State) ->
             BadPort ->
                 {error, io_lib:format("invalid port: ~p", [BadPort]), ""}
         end,
-    SessionFinding =
-        case proplists:get_value(session_backend, NovaConfig) of
-            undefined ->
-                {warn, "session_backend unset (defaults to ETS)",
-                    "Fine for dev; pick a durable backend for production"};
-            Backend ->
-                {ok, io_lib:format("session_backend = ~p", [Backend])}
+    [json_finding(JsonLib, JsonStatus)] ++
+        misplaced_json_lib(NovaConfig, Bootstrap) ++
+        [CowboyFinding] ++
+        session_findings(NovaConfig, BootstrapConfig, Bootstrap).
+
+-type json_lib_status() :: ok | missing | incomplete | raw_json_unsupported.
+-type finding() :: {ok, iodata()} | {warn | error, iodata(), iodata()}.
+
+json_lib_status(Lib) when is_atom(Lib) ->
+    case code:ensure_loaded(Lib) of
+        {module, Lib} ->
+            case
+                erlang:function_exported(Lib, encode, 1) andalso
+                    erlang:function_exported(Lib, decode, 1)
+            of
+                false -> incomplete;
+                true when Lib =:= json -> raw_json_status();
+                true -> ok
+            end;
+        _ ->
+            missing
+    end;
+json_lib_status(_Lib) ->
+    missing.
+
+%% nova_json, when present, accepts a decode/1 that returns the term itself.
+raw_json_status() ->
+    _ = code:ensure_loaded(nova_json),
+    case erlang:function_exported(nova_json, decode, 1) of
+        true -> ok;
+        false -> raw_json_unsupported
+    end.
+
+json_finding(JsonLib, ok) ->
+    {ok, io_lib:format("json_lib = ~p", [JsonLib])};
+json_finding(JsonLib, missing) ->
+    {error, io_lib:format("json_lib = ~p, but that module is not available", [JsonLib]),
+        "Add the library to deps, or remove json_lib to use the default (thoas)"};
+json_finding(JsonLib, incomplete) ->
+    {error, io_lib:format("json_lib = ~p does not export encode/1 and decode/1", [JsonLib]),
+        "Nova calls JsonLib:encode/1 and JsonLib:decode/1"};
+json_finding(json, raw_json_unsupported) ->
+    {error, "json_lib = json breaks JSON request bodies with this Nova",
+        "OTP json:decode/1 returns the term, but this Nova expects {ok, Term}. "
+        "Remove json_lib to use thoas, or point it at a module whose decode/1 returns {ok, Term}"}.
+
+misplaced_json_lib(NovaConfig, Bootstrap) ->
+    case proplists:is_defined(json_lib, NovaConfig) of
+        true ->
+            [
+                {warn, "json_lib is set under nova",
+                    io_lib:format(
+                        "Nova reads json_lib from the bootstrap application; move it to {~p, [...]}",
+                        [
+                            Bootstrap
+                        ]
+                    )}
+            ];
+        false ->
+            []
+    end.
+
+session_findings(NovaConfig, BootstrapConfig, Bootstrap) ->
+    Stale =
+        case proplists:is_defined(session_backend, NovaConfig) of
+            true ->
+                [
+                    {warn, "session_backend is not a Nova setting",
+                        "Nova reads session_manager (default nova_session_ets)"}
+                ];
+            false ->
+                []
         end,
-    [JsonFinding, CowboyFinding, SessionFinding].
+    Sessions =
+        case proplists:get_value(use_sessions, BootstrapConfig, true) of
+            false ->
+                {ok,
+                    io_lib:format("sessions disabled ({~p, [{use_sessions, false}]})", [Bootstrap])};
+            _ ->
+                Manager = proplists:get_value(session_manager, NovaConfig, nova_session_ets),
+                {ok, io_lib:format("session_manager = ~p", [Manager])}
+        end,
+    Stale ++ [Sessions].
+
+bootstrap_app(Config, AppName) ->
+    case proplists:get_value(bootstrap_application, app_env(Config, nova)) of
+        Bootstrap when is_atom(Bootstrap), Bootstrap =/= undefined -> Bootstrap;
+        _ -> AppName
+    end.
+
+app_env(Config, App) ->
+    case proplists:get_value(App, Config, []) of
+        Env when is_list(Env) -> Env;
+        _ -> []
+    end.
 
 check_routes(State) ->
     AppName = rebar3_nova_utils:get_app_name(State),
-    try nova_router:compile([AppName]) of
+    try rebar3_nova_utils:compile_routes(State, AppName) of
         Dispatch ->
             Routes = collect_route_handlers(Dispatch),
             HandlerFindings = [check_handler(R) || R <- Routes],
@@ -241,23 +333,15 @@ check_routes(State) ->
 collect_route_handlers(Dispatch) ->
     [extract_handler(Route) || Route <- rebar3_nova_dispatch:routes(Dispatch)].
 
-extract_handler(
-    {Path, Method, #nova_handler_value{
-        module = undefined,
-        function = undefined,
-        callback = Cb
-    }}
-) when is_function(Cb) ->
-    {module, M} = lists:keyfind(module, 1, erlang:fun_info(Cb)),
-    {Path, Method, M, '$callback', captured};
-extract_handler({Path, Method, #nova_handler_value{module = Mod, function = Func}}) when
-    Mod =/= undefined
-->
-    {Path, Method, Mod, Func, 1};
-extract_handler({Path, Method, #cowboy_handler_value{handler = Handler}}) ->
-    {Path, Method, Handler, init, 2};
-extract_handler({Path, Method, _Payload}) ->
-    {Path, Method, unknown, unknown, 1}.
+extract_handler({Path, Method, Payload}) ->
+    case rebar3_nova_dispatch:handler(Payload) of
+        {controller, Module, Function} -> {Path, Method, Module, Function, 1};
+        {anonymous, Module} -> {Path, Method, Module, '$callback', captured};
+        {cowboy, Handler} -> {Path, Method, Handler, init, 2};
+        static -> {Path, Method, nova_file_controller, '$callback', captured};
+        error_page -> {Path, Method, nova_error_controller, '$callback', captured};
+        unknown -> {Path, Method, unknown, unknown, 1}
+    end.
 
 check_handler({_Path, _Method, unknown, _, _}) ->
     {ok, "handler resolved by cowboy directly"};
