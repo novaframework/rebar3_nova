@@ -19,6 +19,7 @@
 {template, "nova/controller.erl", "{{name}}/src/controllers/{{name}}_main_controller.erl"}.
 {template, "nova/rebar.config", "{{name}}/rebar.config"}.
 {template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
+{template, "nova/dev_vm.args.src", "{{name}}/config/dev_vm.args.src"}.
 {file, "nova/require_cookie", "{{name}}/rel/hooks/require_cookie"}.
 
 {file, "nova/favicon.ico", "{{name}}/priv/assets/favicon.ico"}.

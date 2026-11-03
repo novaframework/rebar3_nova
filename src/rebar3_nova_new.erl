@@ -216,9 +216,7 @@ rebar_relx(Name, _Flags) ->
         "    ]},\n",
         "    {mode, dev},\n",
         "    {sys_config_src, \"./config/dev_sys.config.src\"},\n",
-        "    {vm_args_src, \"./config/vm.args.src\"},\n",
-        "    {extended_start_script_hooks, [{pre_start, [{custom, \"hooks/require_cookie\"}]}]},\n",
-        "    {overlay, [{copy, \"rel/hooks/require_cookie\", \"bin/hooks/require_cookie\"}]}\n",
+        "    {vm_args_src, \"./config/dev_vm.args.src\"}\n",
         "]}.\n\n"
     ].
 
@@ -228,7 +226,11 @@ rebar_profiles(_Flags) ->
         "    {prod, [\n",
         "        {relx, [\n",
         "            {mode, prod},\n",
-        "            {sys_config_src, \"./config/prod_sys.config.src\"}\n",
+        "            {sys_config_src, \"./config/prod_sys.config.src\"},\n",
+        "            {vm_args_src, \"./config/vm.args.src\"},\n",
+        "            %% Refuse to start without RELEASE_COOKIE (config/vm.args.src)\n",
+        "            {extended_start_script_hooks, [{pre_start, [{custom, \"hooks/require_cookie\"}]}]},\n",
+        "            {overlay, [{copy, \"rel/hooks/require_cookie\", \"bin/hooks/require_cookie\"}]}\n",
         "        ]}\n",
         "    ]},\n",
         "    {test, [\n",
@@ -892,12 +894,17 @@ sys_config_otel(_Env, _Flags) ->
 
 -spec generate_vm_args(string()) -> ok.
 generate_vm_args(Name) ->
-    Path = filename:join([Name, "config", "vm.args.src"]),
+    generate_vm_args(Name, "vm.args.src"),
+    generate_vm_args(Name, "dev_vm.args.src").
+
+-spec generate_vm_args(string(), string()) -> ok.
+generate_vm_args(Name, File) ->
+    Path = filename:join([Name, "config", File]),
     PrivDir =
         case code:priv_dir(rebar3_nova) of
             Dir when is_list(Dir) -> Dir
         end,
-    {ok, Source} = file:read_file(filename:join([PrivDir, "templates", "nova", "vm.args.src"])),
+    {ok, Source} = file:read_file(filename:join([PrivDir, "templates", "nova", File])),
     NameBin =
         case unicode:characters_to_binary(Name) of
             Bin when is_binary(Bin) -> Bin
@@ -1207,7 +1214,9 @@ maybe_generate_docker(Name, #{docker := true}) ->
         Name,
         " ./\n",
         "RUN mkdir log && chown app:app log releases/*/\n",
-        "ENV ERL_CRASH_DUMP=/app/log/erl_crash.dump\n\n",
+        "ENV ERL_CRASH_DUMP=/app/log/erl_crash.dump\n",
+        "# Distribution is on loopback (config/vm.args.src); keep epmd there too.\n",
+        "ENV ERL_EPMD_ADDRESS=127.0.0.1\n\n",
         "USER app\n\n",
         "EXPOSE 8080\n\n",
         "# RELEASE_COOKIE is required, or the node refuses to start:\n",

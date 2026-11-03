@@ -34,7 +34,8 @@
     positional_project_name/1,
     release_requires_the_cookie/1,
     pgo_prod_pool_uses_tls/1,
-    migrations_are_a_release_step/1
+    migrations_are_a_release_step/1,
+    epmd_address_is_documented/1
 ]).
 
 all() ->
@@ -68,7 +69,8 @@ all() ->
         positional_project_name,
         release_requires_the_cookie,
         pgo_prod_pool_uses_tls,
-        migrations_are_a_release_step
+        migrations_are_a_release_step,
+        epmd_address_is_documented
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -611,18 +613,28 @@ positional_project_name(_Config) ->
 %% With RELEASE_COOKIE unset the node starts with an empty cookie and then
 %% bin/<app> ping, stop and remote_console cannot reach it, and daemon waits
 %% for it forever. The pre_start hook refuses to start it instead.
+%% Only prod releases need RELEASE_COOKIE; a development release takes the
+%% cookie from ~/.erlang.cookie.
 release_requires_the_cookie(_Config) ->
     Name = "testapp_cookiehook",
     rebar3_nova_new:generate_project(Name, default_flags()),
     Hook = filename:join(Name, "rel/hooks/require_cookie"),
-    assert_cookie_hook(prop(relx, consult_rebar_config(Name))),
+    assert_cookie_hook_in_prod_only(consult_rebar_config(Name)),
+    DevVmArgs = read_file(Name, "config/dev_vm.args.src"),
+    assert_not_contains(DevVmArgs, "-setcookie"),
+    assert_contains(DevVmArgs, "-sname testapp_cookiehook@localhost"),
     [
         begin
+            Contents = read_file(templates_dir(), Template),
             assert_contains(
-                read_file(templates_dir(), Template),
+                Contents,
                 "{file, \"nova/require_cookie\", \"{{name}}/rel/hooks/require_cookie\"}"
             ),
-            assert_cookie_hook(prop(relx, render_template_rebar_config(Config)))
+            assert_contains(
+                Contents,
+                "{template, \"nova/dev_vm.args.src\", \"{{name}}/config/dev_vm.args.src\"}"
+            ),
+            assert_cookie_hook_in_prod_only(render_template_rebar_config(Config))
         end
      || {Template, Config} <- [
             {"nova.template", "nova/rebar.config"},
@@ -651,6 +663,16 @@ migrations_are_a_release_step(_Config) ->
         "bin/{{name}} eval 'kura_migrator:migrate({{name}}_repo).'"
     ).
 
+%% Distribution is on loopback, but epmd is not unless told so.
+epmd_address_is_documented(_Config) ->
+    Name = "testapp_epmd",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{docker => true}),
+    [
+        assert_contains(read_file(Name, VmArgs), "ERL_EPMD_ADDRESS=127.0.0.1")
+     || VmArgs <- ["config/vm.args.src", "config/dev_vm.args.src"]
+    ],
+    assert_contains(read_file(Name, "Dockerfile"), "\nENV ERL_EPMD_ADDRESS=127.0.0.1\n").
+
 %% pgo hands ssl_options straight to ssl:connect/2, which since OTP 26
 %% refuses verify_peer without a trust store and checks the host name only
 %% against server_name_indication on an upgraded socket.
@@ -667,6 +689,15 @@ pgo_prod_pool_uses_tls(_Config) ->
     Source = read_file(Name, "config/prod_sys.config.src"),
     assert_contains(Source, "ssl => ${DATABASE_SSL:-true}"),
     assert_contains(Source, "{server_name_indication, \"${DATABASE_HOST}\"}").
+
+assert_cookie_hook_in_prod_only(RebarConfig) ->
+    Dev = prop(relx, RebarConfig),
+    Prod = prop(relx, prop(prod, prop(profiles, RebarConfig))),
+    ?assertEqual(undefined, prop(extended_start_script_hooks, Dev)),
+    ?assertEqual(undefined, prop(overlay, Dev)),
+    ?assertEqual("./config/dev_vm.args.src", prop(vm_args_src, Dev)),
+    ?assertEqual("./config/vm.args.src", prop(vm_args_src, Prod)),
+    assert_cookie_hook(Prod).
 
 assert_cookie_hook(Relx) ->
     ?assertEqual(

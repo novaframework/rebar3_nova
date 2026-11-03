@@ -18,6 +18,7 @@
 {template, "nova_lfe/controller.lfe", "{{name}}/src/controllers/{{name}}_main_controller.lfe"}.
 {template, "nova_lfe/rebar.config", "{{name}}/rebar.config"}.
 {template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
+{template, "nova/dev_vm.args.src", "{{name}}/config/dev_vm.args.src"}.
 {file, "nova/require_cookie", "{{name}}/rel/hooks/require_cookie"}.
 
 {file, "nova/favicon.ico", "{{name}}/priv/assets/favicon.ico"}.
