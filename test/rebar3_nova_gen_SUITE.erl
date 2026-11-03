@@ -21,9 +21,7 @@
     auth_names_follow_the_app/1,
     auth_instructions_pin_nova_auth_to_0_2/1,
     auth_rate_limit_runs_before_the_body_is_decoded/1,
-    auth_rate_limit_keys_on_the_peer/1,
-    auth_rate_limit_proxy_variant_is_formatted/1,
-    auth_rate_limit_proxy_variant_trusts_only_proxies/1,
+    auth_instructions_cover_sessions_enumeration_and_proxies/1,
     auth_token_schema_has_the_refresh_fields/1,
     auth_registration_needs_a_matching_confirmation/1,
     auth_changesets_scrub_the_password/1,
@@ -49,9 +47,7 @@ all() ->
         auth_names_follow_the_app,
         auth_instructions_pin_nova_auth_to_0_2,
         auth_rate_limit_runs_before_the_body_is_decoded,
-        auth_rate_limit_keys_on_the_peer,
-        auth_rate_limit_proxy_variant_is_formatted,
-        auth_rate_limit_proxy_variant_trusts_only_proxies,
+        auth_instructions_cover_sessions_enumeration_and_proxies,
         auth_token_schema_has_the_refresh_fields,
         auth_registration_needs_a_matching_confirmation,
         auth_changesets_scrub_the_password,
@@ -200,38 +196,26 @@ auth_instructions_pin_nova_auth_to_0_2(_Config) ->
 auth_rate_limit_runs_before_the_body_is_decoded(_Config) ->
     Text = rebar3_nova_gen_auth:instructions("blog"),
     Limiter = string:str(Text, "{pre_request, blog_rate_limit, #{}}"),
+    BodyLimit = string:str(Text, "{pre_request, blog_body_limit, #{max_bytes => 65536}}"),
     Decoder = string:str(Text, "{pre_request, nova_request_plugin"),
     ?assert(Limiter > 0),
-    ?assert(Limiter < Decoder).
+    ?assert(Limiter < BodyLimit),
+    ?assert(BodyLimit < Decoder),
+    ?assertEqual(1, length(string:split(Text, "nova_request_plugin", all)) - 1),
+    ?assertNotEqual(nomatch, string:find(Text, "plugins => [],")).
 
-auth_rate_limit_keys_on_the_peer(Config) ->
-    Module = compile_source(Config, "blog_rate_limit", render_auth("rate_limit.erl.src")),
-    ?assertEqual({10, 0, 0, 2}, Module:client_ip(proxied_req({10, 0, 0, 2}, ~"203.0.113.7"))).
-
-auth_rate_limit_proxy_variant_is_formatted(_Config) ->
-    assert_formatted(proxy_variant(render_auth("rate_limit.erl.src"))).
-
-auth_rate_limit_proxy_variant_trusts_only_proxies(Config) ->
-    Module = compile_source(
-        Config, "blog_proxy_ip", proxy_variant(render_auth("rate_limit.erl.src"))
-    ),
-    Proxy = {10, 0, 0, 2},
-    Client = {203, 0, 113, 7},
-    application:set_env(blog, trusted_proxies, [Proxy, {10, 0, 0, 3}]),
-    try
-        ?assertEqual(Client, Module:client_ip(proxied_req(Client, ~"198.51.100.1"))),
-        ?assertEqual(Client, Module:client_ip(proxied_req(Proxy, ~"198.51.100.1, 203.0.113.7"))),
-        ?assertEqual(Client, Module:client_ip(proxied_req(Proxy, ~"203.0.113.7, 10.0.0.3"))),
-        ?assertEqual(
-            {16#2001, 16#db8, 0, 0, 0, 0, 0, 1},
-            Module:client_ip(proxied_req(Proxy, ~"2001:db8::1"))
-        ),
-        ?assertEqual(Proxy, Module:client_ip(proxied_req(Proxy, ~"10.0.0.3"))),
-        ?assertEqual(Proxy, Module:client_ip(proxied_req(Proxy, ~"203.0.113.7, not-an-ip"))),
-        ?assertEqual(Proxy, Module:client_ip(#{peer => {Proxy, 443}, headers => #{}}))
-    after
-        application:unset_env(blog, trusted_proxies)
-    end.
+auth_instructions_cover_sessions_enumeration_and_proxies(_Config) ->
+    Text = rebar3_nova_gen_auth:instructions("blog"),
+    [
+        ?assertNotEqual(nomatch, string:find(Text, Needle), Needle)
+     || Needle <- [
+            "{blog, [{use_sessions, false}]}",
+            "tells anyone which emails have accounts",
+            "{trusted_proxies, [",
+            "nova_auth_rate_limit:client_ip/1",
+            "20 attempts per email"
+        ]
+    ].
 
 auth_token_schema_has_the_refresh_fields(Config) ->
     Token = compile_source(Config, "blog_user_token", render_auth("user_token.erl.src")),
@@ -295,24 +279,6 @@ auth_files() ->
 
 render_auth(Template) ->
     rebar3_nova_gen_auth:render(Template, "blog").
-
-%% The commented-out trusted-proxy client_ip/1 in the rate-limit plugin, as a
-%% module of its own.
--spec proxy_variant(binary()) -> binary().
-proxy_variant(Source) ->
-    [_, After] = binary:split(Source, ~"\n%% client_ip(Req) ->\n"),
-    Body = uncomment([~"%% client_ip(Req) ->" | binary:split(After, ~"\n", [global])]),
-    Header = ~"-module(blog_proxy_ip).\n\n-export([client_ip/1]).\n\n",
-    iolist_to_binary([Header | [[Line, ~"\n"] || Line <- Body]]).
-
-%% The comment block at the head of Lines, without its comment markers.
--spec uncomment([binary()]) -> [binary()].
-uncomment([~"%%" | Lines]) -> [~"" | uncomment(Lines)];
-uncomment([<<"%% ", Line/binary>> | Lines]) -> [Line | uncomment(Lines)];
-uncomment(_) -> [].
-
-proxied_req(Peer, ForwardedFor) ->
-    #{peer => {Peer, 443}, headers => #{~"x-forwarded-for" => ForwardedFor}}.
 
 user_schema(Config) ->
     _ = compile_source(Config, "nova_auth_password", [

@@ -1,10 +1,14 @@
 -module({{app}}_rate_limit).
 -behaviour(nova_plugin).
 
--export([pre_request/4, post_request/4, plugin_info/0, options/0, client_ip/1]).
+-export([pre_request/4, post_request/4, plugin_info/0, options/0]).
+-export([client_ip/1, rate_limit_key/1, check_account/1]).
+
+-define(ACCOUNT_LIMITER, {{app}}_account_rate_limit).
 
 %% Wraps nova_auth_rate_limit, which in nova_auth 0.2.0 needs every option
-%% set and replies {stop, Req}, a return Nova does not accept.
+%% set and replies {stop, Req}, a return Nova does not accept. Once nova_auth
+%% ships its own client_ip/1, it replaces the address handling below.
 pre_request(Req, Env, Options, State) ->
     case nova_auth_rate_limit:pre_request(Req, Env, maps:merge(options(), Options), State) of
         {stop, Req1} -> {stop, Req1, State};
@@ -29,42 +33,85 @@ options() ->
         limit => 10,
         window => 60000,
         algorithm => sliding_window,
-        key_fun => fun ?MODULE:client_ip/1
+        key_fun => fun ?MODULE:rate_limit_key/1
     }.
 
-%% Keys on the TCP peer, which is the client only when the node is exposed
-%% directly. Behind a reverse proxy every request has the proxy's address, so
-%% all clients share one bucket and a few requests lock everyone out of login.
-%% Then replace client_ip/1 with the variant below and list the proxies in
-%% {{app}}'s env, e.g. {trusted_proxies, [{10, 0, 0, 2}]} in sys.config.
-client_ip(Req) ->
-    {IP, _Port} = cowboy_req:peer(Req),
-    IP.
+%% One bucket per IPv4 address and per IPv6 /64, since a single host
+%% usually holds a whole /64.
+rate_limit_key(Req) ->
+    case client_ip(Req) of
+        {A, B, C, D, _, _, _, _} -> {A, B, C, D, 0, 0, 0, 0};
+        IP -> IP
+    end.
 
-%% Trusts x-forwarded-for only from a trusted proxy, and takes its right-most
-%% address that is not a trusted proxy: the entries left of that one were
-%% written by the client and can be anything.
-%%
-%% client_ip(Req) ->
-%%     {Peer, _Port} = cowboy_req:peer(Req),
-%%     Trusted = application:get_env({{app}}, trusted_proxies, []),
-%%     case lists:member(Peer, Trusted) of
-%%         true ->
-%%             Hops = binary:split(cowboy_req:header(~"x-forwarded-for", Req, ~""), ~",", [global]),
-%%             forwarded_client(lists:reverse(Hops), Peer, Trusted);
-%%         false ->
-%%             Peer
-%%     end.
-%%
-%% forwarded_client([], Peer, _Trusted) ->
-%%     Peer;
-%% forwarded_client([Hop | Hops], Peer, Trusted) ->
-%%     case inet:parse_strict_address(binary_to_list(string:trim(Hop))) of
-%%         {ok, IP} ->
-%%             case lists:member(IP, Trusted) of
-%%                 true -> forwarded_client(Hops, Peer, Trusted);
-%%                 false -> IP
-%%             end;
-%%         {error, einval} ->
-%%             Peer
-%%     end.
+%% The TCP peer, unless it is one of the trusted_proxies in the {{app}} env
+%% (addresses or {Address, PrefixLength} ranges, default []). Then the client
+%% is the right-most x-forwarded-for address that is not a trusted proxy:
+%% entries left of it were written by the client and can be anything.
+client_ip(Req) ->
+    {Peer, _Port} = cowboy_req:peer(Req),
+    Trusted = application:get_env({{app}}, trusted_proxies, []),
+    case is_trusted(unmap(Peer), Trusted) of
+        true ->
+            Hops = binary:split(cowboy_req:header(~"x-forwarded-for", Req, ~""), ~",", [global]),
+            forwarded_client(lists:reverse(Hops), unmap(Peer), Trusted);
+        false ->
+            unmap(Peer)
+    end.
+
+forwarded_client([], Peer, _Trusted) ->
+    Peer;
+forwarded_client([Hop | Hops], Peer, Trusted) ->
+    case inet:parse_strict_address(string:trim(binary_to_list(Hop))) of
+        {ok, IP} ->
+            case is_trusted(unmap(IP), Trusted) of
+                true -> forwarded_client(Hops, Peer, Trusted);
+                false -> unmap(IP)
+            end;
+        {error, einval} ->
+            Peer
+    end.
+
+is_trusted(IP, Trusted) ->
+    lists:any(fun(Range) -> in_range(IP, Range) end, Trusted).
+
+in_range(IP, {Network, Length}) when is_tuple(Network), is_integer(Length) ->
+    Bits = address_bits(IP),
+    NetworkBits = address_bits(unmap(Network)),
+    bit_size(Bits) =:= bit_size(NetworkBits) andalso Length =< bit_size(Bits) andalso
+        prefix(Bits, Length) =:= prefix(NetworkBits, Length);
+in_range(IP, Address) ->
+    IP =:= unmap(Address).
+
+address_bits({A, B, C, D}) -> <<A, B, C, D>>;
+address_bits({A, B, C, D, E, F, G, H}) -> <<A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>>.
+
+prefix(Bits, Length) ->
+    <<Prefix:Length/bitstring, _/bitstring>> = Bits,
+    Prefix.
+
+%% ::ffff:a.b.c.d is a.b.c.d.
+unmap({0, 0, 0, 0, 0, 16#ffff, AB, CD}) -> {AB bsr 8, AB band 255, CD bsr 8, CD band 255};
+unmap(IP) -> IP.
+
+%% A per-account limit on top of the per-address one, so rotating addresses
+%% does not buy unlimited guesses at one password. It is generous, 20 per
+%% 15 minutes, so failing logins in a victim's name hardly locks them out.
+check_account(Email) ->
+    case {{app}}_user:normalize_email(Email) of
+        {ok, Normalized} ->
+            ok = ensure_account_limiter(),
+            case seki:check(?ACCOUNT_LIMITER, Normalized) of
+                {allow, _} -> allow;
+                {deny, #{retry_after := RetryAfterMs}} -> {deny, max(1, RetryAfterMs div 1000)}
+            end;
+        error ->
+            allow
+    end.
+
+ensure_account_limiter() ->
+    Options = #{algorithm => sliding_window, limit => 20, window => 900000},
+    case seki:new_limiter(?ACCOUNT_LIMITER, Options) of
+        ok -> ok;
+        {error, already_registered} -> ok
+    end.

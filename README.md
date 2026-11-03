@@ -122,6 +122,7 @@ Scaffolds email/password authentication with bearer tokens on [nova_auth](https:
 - `src/myapp_auth_security.erl`: `require_bearer/1` for route groups
 - `src/controllers/myapp_auth_controller.erl`: `register/1`, `login/1`, `logout/1`, `me/1`
 - `src/plugins/myapp_rate_limit.erl`: rate limiting for login and registration
+- `src/plugins/myapp_body_limit.erl`: refuses request bodies over `max_bytes` (default 65536) before they are read
 - `test/myapp_auth_SUITE.erl`
 
 ```
@@ -133,7 +134,12 @@ It then prints the deps (`nova_auth`, `kura`, `kura_postgres`), the `rebar3_kura
 - Registration takes `email`, `password` and `password_confirmation`. The changesets drop the plaintext from the changeset's changes and params once hashed, valid or not, so it does not reach a log in `{error, Changeset}`.
 - `email_changeset/2` (used by `nova_auth_accounts:change_identity/4`) resets `confirmed_at` when the address really changes; `password_changeset/2` hashes the new password.
 - The token schema has `family_id` and `used_at`, which `nova_auth_refresh` needs.
-- Put the rate limiter before `nova_request_plugin`, as the printed routes do, so a flood is refused before its body is decoded. It keys on the TCP peer, which is the client only when the node is exposed directly. Behind a reverse proxy every client shares the proxy's address and one bucket: switch to the commented-out `client_ip/1` in the plugin, which reads `x-forwarded-for` only from the proxies in `{trusted_proxies, [...]}` in the app env and takes the right-most address that is not one of them.
+- The public route group runs `myapp_rate_limit`, then `myapp_body_limit`, then `nova_request_plugin`, so a flood or an oversized body (or a chunked one, which has no length up front) is refused with 429 or 413 before anything reads it. The bearer group sets `plugins => []`: Nova runs pre-request plugins before security, so a global body-decoding plugin would read the body of a request that has no token at all.
+- `require_bearer/1` reads the `Authorization` header bytewise (anything but a well-formed `Bearer <b64token>` is a 401, never a crash) and puts only the user's `id` and `email` in `auth_data`, never the password hash.
+- The rate limit keys on the client address: one bucket per IPv4 address and per IPv6 /64, with IPv4-mapped addresses unmapped. The address is the TCP peer unless the peer is in `{trusted_proxies, [...]}` in the app env (addresses or `{Address, PrefixLength}` ranges, default `[]`); then it is the right-most `x-forwarded-for` address that is not a trusted proxy. Once nova_auth 0.3 is released, its `nova_auth_rate_limit:client_ip/1` replaces this code.
+- `login/1` also allows 20 attempts per normalised email in 15 minutes, whatever the address, so rotating addresses does not buy unlimited guesses. The limit is generous so that failing logins in someone's name hardly locks them out.
+- Registration answers 422 for a taken email, which tells anyone which addresses have accounts. Put email confirmation in front of it if that matters.
+- The tokens are bearer tokens, so the printed instructions turn Nova's session cookie off with `{use_sessions, false}` in the app's env.
 
 ### `nova openapi` — Generate OpenAPI 3.0.3 spec
 

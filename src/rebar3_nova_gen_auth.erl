@@ -22,7 +22,7 @@ init(State) ->
         {desc,
             "Generates a nova_auth config module, Kura user and token schemas, an accounts "
             "module, a bearer-token security function, a JSON controller (register, login, "
-            "logout, me), a rate-limit plugin and a CT suite. Migrations come from the rebar3_kura compile hook."}
+            "logout, me), rate-limit and body-limit plugins and a CT suite. Migrations come from the rebar3_kura compile hook."}
     ]),
     {ok, rebar_state:add_provider(State, Provider)}.
 
@@ -53,6 +53,7 @@ files(App) ->
         {"accounts.erl.src", "src/" ++ App ++ "_accounts.erl"},
         {"auth_security.erl.src", "src/" ++ App ++ "_auth_security.erl"},
         {"rate_limit.erl.src", "src/plugins/" ++ App ++ "_rate_limit.erl"},
+        {"body_limit.erl.src", "src/plugins/" ++ App ++ "_body_limit.erl"},
         {"auth_controller.erl.src", "src/controllers/" ++ App ++ "_auth_controller.erl"},
         {"auth_SUITE.erl.src", "test/" ++ App ++ "_auth_SUITE.erl"}
     ].
@@ -74,45 +75,53 @@ print_instructions(App) ->
 -doc "The next steps printed after generating, for the application `App`.".
 -spec instructions(string()) -> string().
 instructions(App) ->
-    lists:flatten(
-        io_lib:format(
-            "~nAuthentication files generated. Next steps:~n~n"
-            "1. Add the deps to rebar.config and to the applications list in ~s.app.src:~n"
-            "     {nova_auth, \"~~> 0.2.0\"}, {kura, \"~~> 2.25\"}, {kura_postgres, \"~~> 1.1\"}~n"
-            "   Keep nova_auth on 0.2.x: the generated rate-limit plugin sets the key_fun "
-            "option, which later versions reject.~n"
-            "   ~s_auth expects a Kura repo module named ~s_repo, as `rebar3 nova new --kura` "
-            "generates.~n~n"
-            "2. Let rebar3_kura write the users and user_tokens migrations from the schemas:~n"
-            "     {project_plugins, [{rebar3_kura, \"~~> 0.16\"}]}.~n"
-            "     {provider_hooks, [{pre, [{compile, {kura, compile}}]}]}.~n"
-            "   then run them, for example with kura_migrator:migrate(~s_repo) at boot.~n~n"
-            "3. Add the routes. ~s_rate_limit limits login and registration to 10 requests a "
-            "minute per client IP, and runs before the body is decoded. It keys on the TCP "
-            "peer, which is the client only when the node is exposed directly; behind a "
-            "reverse proxy, switch to the trusted-proxy client_ip/1 in it.~n"
-            "     #{prefix => \"/api\",~n"
-            "       plugins => [~n"
-            "           {pre_request, ~s_rate_limit, #{}},~n"
-            "           {pre_request, nova_request_plugin, #{decode_json_body => true}}~n"
-            "       ],~n"
-            "       routes => [~n"
-            "           {\"/users\", fun ~s_auth_controller:register/1, #{methods => [post]}},~n"
-            "           {\"/tokens\", fun ~s_auth_controller:login/1, #{methods => [post]}}~n"
-            "       ]},~n"
-            "     #{prefix => \"/api\",~n"
-            "       security => fun ~s_auth_security:require_bearer/1,~n"
-            "       plugins => [{pre_request, nova_request_plugin, #{decode_json_body => true}}],~n"
-            "       routes => [~n"
-            "           {\"/tokens\", fun ~s_auth_controller:logout/1, #{methods => [delete]}},~n"
-            "           {\"/me\", fun ~s_auth_controller:me/1, #{methods => [get]}}~n"
-            "       ]}~n~n"
-            "4. Protect your own API routes with security => fun ~s_auth_security:require_bearer/1; "
-            "the user is in the request under auth_data.~n"
-            "   Registration takes email, password and password_confirmation. Change an email "
-            "with nova_auth_accounts:change_identity/4, which resets confirmed_at.~n"
-            "   The suite in test/~s_auth_SUITE.erl registers users in the database it runs "
-            "against.~n",
-            lists:duplicate(13, App)
-        )
-    ).
+    Template =
+        "\nAuthentication files generated. Next steps:\n\n"
+        "1. Add the deps to rebar.config and to the applications list in APP.app.src:\n"
+        "     {nova_auth, \"~> 0.2.0\"}, {kura, \"~> 2.25\"}, {kura_postgres, \"~> 1.1\"}\n"
+        "   Keep nova_auth on 0.2.x: the generated rate-limit plugin sets the key_fun "
+        "option, which later versions reject. Once nova_auth 0.3 is released, its "
+        "nova_auth_rate_limit:client_ip/1 replaces the address handling in APP_rate_limit.\n"
+        "   APP_auth expects a Kura repo module named APP_repo, as `rebar3 nova new --kura` "
+        "generates.\n\n"
+        "2. Let rebar3_kura write the users and user_tokens migrations from the schemas:\n"
+        "     {project_plugins, [{rebar3_kura, \"~> 0.16\"}]}.\n"
+        "     {provider_hooks, [{pre, [{compile, {kura, compile}}]}]}.\n"
+        "   then run them, for example with kura_migrator:migrate(APP_repo) at boot.\n\n"
+        "3. Authentication is bearer-only, so turn Nova's session cookie off in APP's env "
+        "in sys.config:\n"
+        "     {APP, [{use_sessions, false}]}\n\n"
+        "4. Add the routes. Before anything reads the body, APP_rate_limit allows 10 "
+        "requests a minute per client address (per /64 for IPv6) and APP_body_limit "
+        "refuses bodies over 64 KiB. The client address is the TCP peer; behind a reverse "
+        "proxy, list the proxies in APP's env as {trusted_proxies, [{10, 0, 0, 2}, "
+        "{{10, 1, 0, 0}, 16}]} so the client is read from x-forwarded-for. The bearer "
+        "group sets plugins => [] so it does not inherit a global body-decoding plugin, "
+        "which would read the body before the token is checked.\n"
+        "     #{prefix => \"/api\",\n"
+        "       plugins => [\n"
+        "           {pre_request, APP_rate_limit, #{}},\n"
+        "           {pre_request, APP_body_limit, #{max_bytes => 65536}},\n"
+        "           {pre_request, nova_request_plugin, #{decode_json_body => true}}\n"
+        "       ],\n"
+        "       routes => [\n"
+        "           {\"/users\", fun APP_auth_controller:register/1, #{methods => [post]}},\n"
+        "           {\"/tokens\", fun APP_auth_controller:login/1, #{methods => [post]}}\n"
+        "       ]},\n"
+        "     #{prefix => \"/api\",\n"
+        "       security => fun APP_auth_security:require_bearer/1,\n"
+        "       plugins => [],\n"
+        "       routes => [\n"
+        "           {\"/tokens\", fun APP_auth_controller:logout/1, #{methods => [delete]}},\n"
+        "           {\"/me\", fun APP_auth_controller:me/1, #{methods => [get]}}\n"
+        "       ]}\n\n"
+        "5. Protect your own API routes with security => fun APP_auth_security:require_bearer/1; "
+        "auth_data in the request holds the user's id and email.\n"
+        "   Registration takes email, password and password_confirmation, and its 422 "
+        "for a taken address tells anyone which emails have accounts; put confirmation "
+        "by email in front of it if that matters. Login also allows 20 attempts per email "
+        "in 15 minutes, whatever the address. Change an email with "
+        "nova_auth_accounts:change_identity/4, which resets confirmed_at.\n"
+        "   The suite in test/APP_auth_SUITE.erl registers users in the database it runs "
+        "against.\n",
+    lists:flatten(string:replace(Template, "APP", App, all)).

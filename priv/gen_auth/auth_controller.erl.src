@@ -14,6 +14,17 @@ register(_Req) ->
     {json, 400, #{}, #{~"error" => ~"expected a JSON object"}}.
 
 login(#{json := #{~"email" := Email, ~"password" := Password}}) ->
+    case {{app}}_rate_limit:check_account(Email) of
+        allow ->
+            authenticate(Email, Password);
+        {deny, RetryAfter} ->
+            Headers = #{~"retry-after" => integer_to_binary(RetryAfter)},
+            {json, 429, Headers, #{~"error" => ~"too many login attempts"}}
+    end;
+login(_Req) ->
+    {json, 400, #{}, #{~"error" => ~"expected email and password"}}.
+
+authenticate(Email, Password) ->
     case {{app}}_accounts:authenticate(Email, Password) of
         {ok, User} ->
             {ok, Token} = {{app}}_accounts:issue_token(User),
@@ -23,9 +34,7 @@ login(#{json := #{~"email" := Email, ~"password" := Password}}) ->
             }};
         {error, invalid_credentials} ->
             {json, 401, #{}, #{~"error" => ~"invalid email or password"}}
-    end;
-login(_Req) ->
-    {json, 400, #{}, #{~"error" => ~"expected email and password"}}.
+    end.
 
 logout(Req) ->
     {ok, Token} = {{app}}_auth_security:bearer_token(Req),
