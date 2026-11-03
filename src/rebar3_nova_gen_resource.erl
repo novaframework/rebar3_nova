@@ -80,6 +80,8 @@ print_route_hints(AppName, Name, Actions) ->
 -doc """
 Route groups for the actions: reads in one, and create, update and delete in
 another behind a security function, so the writes are not public by default.
+The write group lists its own plugins, with a body size limit before the
+body decoder.
 """.
 -spec route_hints(atom(), string(), [atom()]) -> string().
 route_hints(AppName, Name, Actions) ->
@@ -93,19 +95,31 @@ route_hints(AppName, Name, Actions) ->
             Hint <- route_hint(Action, Name, Controller, Schema)
         ]
     end,
-    Security = io_lib:format(
-        "  %% Placeholder: require_bearer/1 comes from `rebar3 nova gen_auth`; use your own\n"
-        "  %% security function if you have one.\n"
-        "  security => fun ~s_auth_security:require_bearer/1,\n",
-        [AppName]
+    Writes = Routes([create, update, delete]),
+    Protected = io_lib:format(
+        "  %% Placeholder: require_bearer/1 and ~s_body_limit come from\n"
+        "  %% `rebar3 nova gen_auth`; use your own if you have them.\n"
+        "  security => fun ~s_auth_security:require_bearer/1,\n"
+        "  %% Plugins run before security, so the group sets its own instead of\n"
+        "  %% inheriting a global body decoder that reads any size of body.\n"
+        "  plugins => [\n"
+        "      {pre_request, ~s_body_limit, #{}},\n"
+        "      {pre_request, nova_request_plugin, #{decode_json_body => true}}~ts\n"
+        "  ],\n",
+        [AppName, AppName, AppName, json_schemas_plugin(Writes)]
     ),
     Groups =
         [route_group("", Reads) || Reads <- [Routes([list, show])], Reads =/= []] ++
-            [
-                route_group(Security, Writes)
-             || Writes <- [Routes([create, update, delete])], Writes =/= []
-            ],
+            [route_group(Protected, Writes) || Writes =/= []],
     lists:flatten(io_lib:format("~ts", [lists:join(",\n", Groups)])).
+
+%% A group's own plugins replace the global ones, so the json_schema in
+%% extra_state is only checked if nova_json_schemas is listed again.
+json_schemas_plugin(Routes) ->
+    case [Route || Route <- Routes, string:find(Route, "json_schema") =/= nomatch] of
+        [] -> "";
+        _ -> ",\n      {pre_request, nova_json_schemas, #{}}"
+    end.
 
 route_group(Security, Routes) ->
     [

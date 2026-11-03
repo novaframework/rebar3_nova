@@ -12,6 +12,7 @@
     resource_schema_does_not_require_id/1,
     resource_route_hints_use_funs/1,
     resource_write_hints_are_behind_security/1,
+    resource_write_hints_limit_the_body/1,
     test_suite_follows_the_routes/1,
     test_suite_compiles/1,
     test_suite_is_erlfmt_formatted/1,
@@ -23,6 +24,8 @@
     auth_instructions_pin_nova_auth_to_0_2/1,
     auth_rate_limit_runs_before_the_body_is_decoded/1,
     auth_instructions_cover_sessions_enumeration_and_proxies/1,
+    auth_protected_group_example_limits_the_body/1,
+    auth_suite_builds_binaries_with_sigils/1,
     auth_token_schema_has_the_refresh_fields/1,
     auth_registration_needs_a_matching_confirmation/1,
     auth_changesets_scrub_the_password/1,
@@ -39,6 +42,7 @@ all() ->
         resource_schema_does_not_require_id,
         resource_route_hints_use_funs,
         resource_write_hints_are_behind_security,
+        resource_write_hints_limit_the_body,
         test_suite_follows_the_routes,
         test_suite_compiles,
         test_suite_is_erlfmt_formatted,
@@ -50,6 +54,8 @@ all() ->
         auth_instructions_pin_nova_auth_to_0_2,
         auth_rate_limit_runs_before_the_body_is_decoded,
         auth_instructions_cover_sessions_enumeration_and_proxies,
+        auth_protected_group_example_limits_the_body,
+        auth_suite_builds_binaries_with_sigils,
         auth_token_schema_has_the_refresh_fields,
         auth_registration_needs_a_matching_confirmation,
         auth_changesets_scrub_the_password,
@@ -124,6 +130,22 @@ resource_write_hints_are_behind_security(_Config) ->
         "[" ++ rebar3_nova_gen_resource:route_hints(blog, "tags", [create]) ++ "]"
     ),
     ?assert(maps:is_key(security, OnlyWrites)).
+
+%% A group's own plugins replace the global ones; without them the write
+%% group inherits a body decoder that runs before security.
+resource_write_hints_limit_the_body(_Config) ->
+    Limited = [
+        {pre_request, blog_body_limit, #{}},
+        {pre_request, nova_request_plugin, #{decode_json_body => true}}
+    ],
+    [_Reads, Writes] = eval_hint(
+        "[" ++ rebar3_nova_gen_resource:route_hints(blog, "tags", ?ACTIONS) ++ "]"
+    ),
+    ?assertEqual(Limited ++ [{pre_request, nova_json_schemas, #{}}], maps:get(plugins, Writes)),
+    [DeleteOnly] = eval_hint(
+        "[" ++ rebar3_nova_gen_resource:route_hints(blog, "tags", [delete]) ++ "]"
+    ),
+    ?assertEqual(Limited, maps:get(plugins, DeleteOnly)).
 
 test_suite_follows_the_routes(_Config) ->
     rebar3_nova_test_router:set_routes([
@@ -212,7 +234,9 @@ auth_instructions_pin_nova_auth_to_0_2(_Config) ->
 %% A limiter after nova_request_plugin decodes every flood request's body
 %% before refusing it.
 auth_rate_limit_runs_before_the_body_is_decoded(_Config) ->
-    Text = rebar3_nova_gen_auth:instructions("blog"),
+    Instructions = rebar3_nova_gen_auth:instructions("blog"),
+    Start = string:str(Instructions, "4. Add the routes"),
+    Text = string:substr(Instructions, Start, string:str(Instructions, "\n\n5.") - Start),
     Limiter = string:str(Text, "{pre_request, blog_rate_limit, #{}}"),
     BodyLimit = string:str(Text, "{pre_request, blog_body_limit, #{max_bytes => 65536}}"),
     Decoder = string:str(Text, "{pre_request, nova_request_plugin"),
@@ -234,6 +258,23 @@ auth_instructions_cover_sessions_enumeration_and_proxies(_Config) ->
             "20 attempts per email"
         ]
     ].
+
+auth_protected_group_example_limits_the_body(_Config) ->
+    Text = rebar3_nova_gen_auth:instructions("blog"),
+    Start = string:str(Text, "5. Protect"),
+    Step = string:substr(Text, Start, string:str(Text, "\n\n6.") - Start),
+    Group = eval_hint(string:substr(Step, string:str(Step, "#{prefix"))),
+    ?assertEqual(fun blog_auth_security:require_bearer/1, maps:get(security, Group)),
+    ?assertEqual(
+        [
+            {pre_request, blog_body_limit, #{}},
+            {pre_request, nova_request_plugin, #{decode_json_body => true}}
+        ],
+        maps:get(plugins, Group)
+    ).
+
+auth_suite_builds_binaries_with_sigils(_Config) ->
+    ?assertEqual(nomatch, binary:match(render_auth("auth_SUITE.erl.src"), ~"<<\"")).
 
 auth_token_schema_has_the_refresh_fields(Config) ->
     Token = compile_source(Config, "blog_user_token", render_auth("user_token.erl.src")),
