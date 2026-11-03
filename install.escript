@@ -10,7 +10,7 @@
 -define(TERM_BOLD, "\033[1m").
 -define(TERM_RESET, "\033[m").
 
--define(NOVA_PLUGIN, {rebar3_nova, {git, "https://github.com/novaframework/rebar3_nova.git", {branch, "master"}}}).
+-define(NOVA_PLUGIN, "{rebar3_nova, \"~> 0.13\"}").
 
 -define(NOVA_LOGO, ["  _   _                    __                                             _    ",
                     " | \\ | | _____   ____ _   / _|_ __ __ _ _ __ ___   _____      _____  _ __| | __",
@@ -75,30 +75,52 @@ consult_rebar3_config() ->
             {error, Error}
     end.
 
-inject_nova_plugin([]) -> [?NOVA_PLUGIN];
-inject_nova_plugin([{rebar3_nova, _}|_] = L) ->
-    L;
-inject_nova_plugin([Hd|Tl]) ->
-    [Hd|inject_nova_plugin(Tl)].
+has_nova_plugin(Plugins) ->
+    lists:any(
+      fun(rebar3_nova) -> true;
+         (P) when is_tuple(P) -> element(1, P) =:= rebar3_nova;
+         (_) -> false
+      end, Plugins).
 
-inject_plugin([], true) -> [];
-inject_plugin([], false) -> [{plugins, [?NOVA_PLUGIN]}];
-inject_plugin([{plugins, Plugins}|Tl], _) ->
-    [{plugins, inject_nova_plugin(Plugins)}|inject_plugin(Tl, true)];
-inject_plugin([Hd|Tl], false) ->
-    [Hd|inject_plugin(Tl, false)].
+%% The global config is edited as text, never rewritten from parsed terms, so
+%% comments and layout survive.
+install_plugin(Terms) ->
+    Path = rebar3_config_path(),
+    case lists:keyfind(plugins, 1, Terms) of
+        {plugins, Plugins} ->
+            case has_nova_plugin(Plugins) of
+                true -> already_installed;
+                false -> insert_into_plugins(Path)
+            end;
+        false ->
+            ok = filelib:ensure_dir(Path),
+            Line = ["\n{plugins, [", ?NOVA_PLUGIN, "]}.\n"],
+            ok = file:write_file(Path, Line, [append]),
+            installed
+    end.
 
+insert_into_plugins(Path) ->
+    {ok, Bin} = file:read_file(Path),
+    case re:run(Bin, "^\\s*\\{\\s*plugins\\s*,\\s*\\[", [multiline]) of
+        {match, [{Start, Len}]} ->
+            <<Before:(Start + Len)/binary, After/binary>> = Bin,
+            Separator = case {string:trim(After, leading), After} of
+                            {<<"]", _/binary>>, _} -> "";
+                            {_, <<"\n", _/binary>>} -> ",";
+                            _ -> ", "
+                        end,
+            ok = file:write_file(Path, [Before, ?NOVA_PLUGIN, Separator, After]),
+            installed;
+        nomatch ->
+            {add_by_hand, Path}
+    end.
 
-write_terms_to_file(Filename, Terms) ->
-    TermsRep = lists:map(fun(Term) ->
-                                 io_lib:format("~p.~n", [Term])
-                         end, Terms),
-    ok = filelib:ensure_dir(Filename),
-    ok = file:write_file(Filename, TermsRep).
-
-write_rebar3_config(Terms) ->
-    write_terms_to_file(rebar3_config_path(), Terms).
-
+print_try_it() ->
+    print(?TERM_GREEN, ?NOVA_LOGO),
+    print(?TERM_GREEN, [""]),
+    print(?TERM_GREEN, ["Congratulations, you have installed Nova plugin for rebar3!"]),
+    print(?TERM_GREEN, ["Try it out with typing:"]),
+    print(?TERM_BLUE, ["$ rebar3 new nova my_first_app"]).
 
 main([]) ->
     %% Check for rebar3
@@ -107,14 +129,17 @@ main([]) ->
             %% Continue with the installation
             case consult_rebar3_config() of
                 {ok, Rebar3Config} ->
-                    %% Inject the nova plugin
-                    UpdatedRebar3Config = inject_plugin(Rebar3Config, false),
-                    write_rebar3_config(UpdatedRebar3Config),
-                    print(?TERM_GREEN, ?NOVA_LOGO),
-                    print(?TERM_GREEN, [""]),
-                    print(?TERM_GREEN, ["Congratulations, you have installed Nova plugin for rebar3!"]),
-                    print(?TERM_GREEN, ["Try it out with typing:"]),
-                    print(?TERM_BLUE, ["$ rebar3 new nova my_first_app"]);
+                    case install_plugin(Rebar3Config) of
+                        installed ->
+                            print_try_it();
+                        already_installed ->
+                            print(?TERM_YELLOW, ["rebar3_nova is already listed in " ++ rebar3_config_path()]),
+                            print_try_it();
+                        {add_by_hand, Path} ->
+                            print(?TERM_YELLOW, ["Your " ++ Path ++ " already has a plugins list.",
+                                                 "Add " ++ ?NOVA_PLUGIN ++ " to it, then run:"]),
+                            print(?TERM_BLUE, ["$ rebar3 new nova my_first_app"])
+                    end;
                 {error, _} ->
                     %% Failed to read rebar3 config file :/
                     print(?TERM_RED, ["Reading rebar3 configuration failed. Check your rebar.config file:"]),
