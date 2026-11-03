@@ -1,0 +1,31 @@
+-module({{app}}_body_limit).
+-behaviour(nova_plugin).
+
+-export([pre_request/4, post_request/4, plugin_info/0]).
+
+-define(MAX_BYTES, 65536).
+
+%% Refuses a body over max_bytes (default 65536) before anything reads it.
+%% A chunked body has no length up front, so it is refused too.
+pre_request(Req, _Env, Options, State) ->
+    Max = maps:get(max_bytes, Options, ?MAX_BYTES),
+    case cowboy_req:body_length(Req) of
+        Length when is_integer(Length), Length =< Max ->
+            {ok, Req, State};
+        _ ->
+            Headers = #{~"content-type" => ~"application/json"},
+            Body = iolist_to_binary(json:encode(#{~"error" => ~"request body too large"})),
+            {stop, cowboy_req:reply(413, Headers, Body, Req), State}
+    end.
+
+post_request(Req, _Env, _Options, State) ->
+    {ok, Req, State}.
+
+plugin_info() ->
+    #{
+        title => ~"{{app}}_body_limit",
+        version => ~"0.1.0",
+        url => ~"https://github.com/novaframework/rebar3_nova",
+        authors => [],
+        description => ~"Refuses request bodies over max_bytes"
+    }.

@@ -1,0 +1,43 @@
+-module({{app}}_login_limit).
+
+-export([key/1, check/1]).
+
+-define(LIMITER, {{app}}_login_limit).
+
+%% The rate-limit key for nova_auth_rate_limit: nova_auth's client_ip/1,
+%% which reads trusted_proxies from the nova_auth env, with IPv6 cut to
+%% its /64, since a single host usually holds a whole /64.
+key(Req) ->
+    case nova_auth_rate_limit:client_ip(Req) of
+        {A, B, C, D, _, _, _, _} -> {A, B, C, D, 0, 0, 0, 0};
+        IP -> IP
+    end.
+
+%% A per-account limit on top of the per-address one, so rotating addresses
+%% does not buy unlimited guesses at one password. It is generous, 20 per
+%% 15 minutes, so failing logins in someone else's name hardly locks them
+%% out.
+check(Email) ->
+    case {{app}}_user:normalize_email(Email) of
+        {ok, Normalized} -> check_key(Normalized);
+        error -> allow
+    end.
+
+check_key(Key) ->
+    try seki:check(?LIMITER, Key) of
+        {allow, _} -> allow;
+        {deny, #{retry_after := RetryAfterMs}} -> {deny, max(1, RetryAfterMs div 1000)}
+    catch
+        error:{limiter_not_found, ?LIMITER} ->
+            ok = new_limiter(),
+            check_key(Key)
+    end.
+
+%% Created on the first login. Two first logins at once can both get here;
+%% the second sees already_registered.
+new_limiter() ->
+    Options = #{algorithm => sliding_window, limit => 20, window => 900000},
+    case seki:new_limiter(?LIMITER, Options) of
+        ok -> ok;
+        {error, already_registered} -> ok
+    end.
