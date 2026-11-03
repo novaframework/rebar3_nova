@@ -40,9 +40,10 @@ prompt_yesno(Message) ->
             yes;
         {ok, [No]} when No == "N" orelse No == "n" ->
             no;
-        P ->
-            io:format("GOT: ~p~n", [P]),
-            prompt_yesno(Message)
+        {ok, _} ->
+            prompt_yesno(Message);
+        _EofOrError ->
+            no
     end.
 
 check_for_rebar3() ->
@@ -71,26 +72,42 @@ check_for_rebar3() ->
 %% Downloads into a fresh private directory, so neither a rebar3 already in
 %% the working directory nor a file planted in a shared one is ever run.
 install_rebar3() ->
-    Dir = filename:join(temp_root(), "rebar3_nova_install_" ++ integer_to_list(erlang:unique_integer([positive]))),
-    ok = file:make_dir(Dir),
-    ok = file:change_mode(Dir, 8#700),
+    Dir = make_private_dir(),
     Rebar3 = filename:join(Dir, "rebar3"),
     try
         case download(?REBAR3_URL) of
-            {ok, Bin} ->
-                case sha256(Bin) of
-                    ?REBAR3_SHA256 ->
+            {ok, Download} ->
+                case verified(Download) of
+                    {ok, Bin} ->
                         ok = file:write_file(Rebar3, Bin),
                         ok = file:change_mode(Rebar3, 8#700),
                         run(Rebar3, ["local", "install"]);
-                    Other ->
-                        {error, {checksum_mismatch, Other}}
+                    {error, _} = Error ->
+                        Error
                 end;
             {error, Reason} ->
                 {error, Reason}
         end
     after
         file:del_dir_r(Dir)
+    end.
+
+%% The name is random, so another user cannot create it first in a shared
+%% temporary directory; make_dir fails if one did anyway.
+make_private_dir() ->
+    Suffix = binary_to_list(binary:encode_hex(crypto:strong_rand_bytes(16), lowercase)),
+    Dir = filename:join(temp_root(), "rebar3_nova_install_" ++ Suffix),
+    ok = file:make_dir(Dir),
+    ok = file:change_mode(Dir, 8#700),
+    Dir.
+
+verified(Bin) ->
+    verified(Bin, ?REBAR3_SHA256).
+
+verified(Bin, Expected) ->
+    case sha256(Bin) of
+        Expected -> {ok, Bin};
+        Other -> {error, {checksum_mismatch, Other}}
     end.
 
 temp_root() ->
@@ -191,10 +208,8 @@ print_try_it() ->
     print(?TERM_BLUE, ["$ rebar3 new nova my_first_app"]).
 
 main([]) ->
-    %% Check for rebar3
     case check_for_rebar3() of
         ok ->
-            %% Continue with the installation
             case consult_rebar3_config() of
                 {ok, Rebar3Config} ->
                     case install_plugin(Rebar3Config) of
@@ -206,13 +221,15 @@ main([]) ->
                         {add_by_hand, Path} ->
                             print(?TERM_YELLOW, ["Your " ++ Path ++ " already has a plugins list.",
                                                  "Add " ++ ?NOVA_PLUGIN ++ " to it, then run:"]),
-                            print(?TERM_BLUE, ["$ rebar3 new nova my_first_app"])
+                            print(?TERM_BLUE, ["$ rebar3 new nova my_first_app"]),
+                            halt(1)
                     end;
                 {error, _} ->
-                    %% Failed to read rebar3 config file :/
                     print(?TERM_RED, ["Reading rebar3 configuration failed. Check your rebar.config file:"]),
-                    print(?TERM_YELLOW, [rebar3_config_path()])
+                    print(?TERM_YELLOW, [rebar3_config_path()]),
+                    halt(1)
             end;
         _ ->
-            print(?TERM_RED, ["Exiting installation"])
+            print(?TERM_RED, ["Exiting installation"]),
+            halt(1)
     end.
