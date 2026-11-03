@@ -2,6 +2,9 @@
 
 -export([init/1, do/1, format_error/1]).
 
+%% Exported for rebar3_nova_gen_SUITE.
+-export([schema/0, route_hints/3]).
+
 -define(PROVIDER, gen_resource).
 -define(DEPS, [{default, compile}]).
 
@@ -49,48 +52,62 @@ format_error(Reason) ->
 generate_schema(AppDir, Name) ->
     Singular = singularize(Name),
     SchemaFile = filename:join([AppDir, "priv", "schemas", Singular ++ ".json"]),
-    Schema = #{
-        <<"$schema">> => <<"http://json-schema.org/draft-07/schema#">>,
-        <<"type">> => <<"object">>,
-        <<"properties">> => #{
-            <<"id">> => #{<<"type">> => <<"integer">>},
-            <<"name">> => #{<<"type">> => <<"string">>}
+    rebar3_nova_utils:write_file_if_not_exists(SchemaFile, [json:format(schema()), $\n]).
+
+-doc """
+A starting request-body schema. Draft 6, because jesse (behind
+nova_json_schemas) knows drafts 3, 4 and 6 only; `id` is left out of
+`required` since a create body has none.
+""".
+-spec schema() -> map().
+schema() ->
+    #{
+        ~"$schema" => ~"http://json-schema.org/draft-06/schema#",
+        ~"type" => ~"object",
+        ~"properties" => #{
+            ~"name" => #{~"type" => ~"string"}
         },
-        <<"required">> => [<<"id">>, <<"name">>]
-    },
-    Json = thoas:encode(Schema),
-    rebar3_nova_utils:write_file_if_not_exists(SchemaFile, Json).
+        ~"required" => [~"name"]
+    }.
 
 print_route_hints(AppName, Name, Actions) ->
-    Controller = io_lib:format("~s_~s_controller", [AppName, Name]),
     rebar_api:info("~nAdd these routes to your router:~n", []),
     lists:foreach(
-        fun
-            (list) ->
-                rebar_api:info("  {<<\"/~s\">>, {~s, list}, #{methods => [get]}}", [
-                    Name, Controller
-                ]);
-            (show) ->
-                rebar_api:info("  {<<\"/~s/:id\">>, {~s, show}, #{methods => [get]}}", [
-                    Name, Controller
-                ]);
-            (create) ->
-                rebar_api:info("  {<<\"/~s\">>, {~s, create}, #{methods => [post]}}", [
-                    Name, Controller
-                ]);
-            (update) ->
-                rebar_api:info("  {<<\"/~s/:id\">>, {~s, update}, #{methods => [put]}}", [
-                    Name, Controller
-                ]);
-            (delete) ->
-                rebar_api:info("  {<<\"/~s/:id\">>, {~s, delete}, #{methods => [delete]}}", [
-                    Name, Controller
-                ]);
-            (_) ->
-                ok
-        end,
-        Actions
+        fun(Hint) -> rebar_api:info("  ~ts", [Hint]) end, route_hints(AppName, Name, Actions)
     ).
+
+-doc "Router entries for the generated actions, in the `fun Mod:Fun/1` form Nova expects.".
+-spec route_hints(atom(), string(), [atom()]) -> [string()].
+route_hints(AppName, Name, Actions) ->
+    Controller = lists:flatten(io_lib:format("~s_~s_controller", [AppName, Name])),
+    Schema = "schemas/" ++ singularize(Name) ++ ".json",
+    [
+        Hint
+     || Action <- Actions, Hint <- [route_hint(Action, Name, Controller, Schema)], Hint =/= skip
+    ].
+
+route_hint(list, Name, Controller, _Schema) ->
+    hint("/" ++ Name, Controller, list, "get", "");
+route_hint(show, Name, Controller, _Schema) ->
+    hint("/" ++ Name ++ "/:id", Controller, show, "get", "");
+route_hint(create, Name, Controller, Schema) ->
+    hint("/" ++ Name, Controller, create, "post", schema_option(Schema));
+route_hint(update, Name, Controller, Schema) ->
+    hint("/" ++ Name ++ "/:id", Controller, update, "put", schema_option(Schema));
+route_hint(delete, Name, Controller, _Schema) ->
+    hint("/" ++ Name ++ "/:id", Controller, delete, "delete", "");
+route_hint(_Action, _Name, _Controller, _Schema) ->
+    skip.
+
+hint(Path, Controller, Function, Method, Extra) ->
+    lists:flatten(
+        io_lib:format("{\"~ts\", fun ~ts:~ts/1, #{methods => [~ts]~ts}},", [
+            Path, Controller, Function, Method, Extra
+        ])
+    ).
+
+schema_option(Schema) ->
+    ", extra_state => #{json_schema => \"" ++ Schema ++ "\"}".
 
 singularize(Name) ->
     case lists:reverse(Name) of

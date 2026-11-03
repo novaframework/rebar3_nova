@@ -1,7 +1,7 @@
 -module(rebar3_nova_gen_controller).
 
 -export([init/1, do/1, format_error/1]).
--export([generate/4]).
+-export([generate/4, generate_content/2]).
 
 -define(PROVIDER, gen_controller).
 -define(DEPS, [{default, compile}]).
@@ -51,36 +51,20 @@ generate(AppName, AppDir, Name, Actions) ->
     Content = generate_content(erlang:list_to_atom(lists:flatten(ModName)), Actions),
     rebar3_nova_utils:write_file_if_not_exists(FileName, Content).
 
+-doc "The source of a controller with a stub per action, formatted as erlfmt would.".
+-spec generate_content(atom(), [atom()]) -> binary().
 generate_content(ModName, Actions) ->
-    Header = io_lib:format(
-        "-module(~s).~n~n"
-        "-export([~s]).~n~n",
-        [ModName, format_exports(Actions)]
-    ),
-    Functions = lists:map(fun(Action) -> generate_function(Action) end, Actions),
-    iolist_to_binary([Header | Functions]).
+    Exports = lists:join(",\n", ["    " ++ atom_to_list(A) ++ "/1" || A <- Actions]),
+    Header = ["-module(", atom_to_list(ModName), ").\n\n-export([\n", Exports, "\n]).\n"],
+    unicode:characters_to_binary([Header | ["\n" ++ generate_function(A) || A <- Actions]]).
 
-format_exports(Actions) ->
-    string:join([io_lib:format("~s/1", [A]) || A <- Actions], ", ").
-
-generate_function(list) ->
-    "list(#{req := _Req} = _NovaReq) ->\n"
-    "    {json, #{<<\"message\">> => <<\"TODO\">>}}.\n\n";
-generate_function(show) ->
-    "show(#{req := _Req} = _NovaReq) ->\n"
-    "    {json, #{<<\"message\">> => <<\"TODO\">>}}.\n\n";
 generate_function(create) ->
-    "create(#{req := _Req} = _NovaReq) ->\n"
-    "    {status, 201, #{}, #{<<\"message\">> => <<\"TODO\">>}}.\n\n";
-generate_function(update) ->
-    "update(#{req := _Req} = _NovaReq) ->\n"
-    "    {json, #{<<\"message\">> => <<\"TODO\">>}}.\n\n";
+    "create(_Req) ->\n"
+    "    {json, 201, #{}, #{~\"message\" => ~\"TODO\"}}.\n";
 generate_function(delete) ->
-    "delete(#{req := _Req} = _NovaReq) ->\n"
-    "    {status, 204}.\n\n";
+    "delete(_Req) ->\n"
+    "    {status, 204}.\n";
 generate_function(Action) ->
-    io_lib:format(
-        "~s(#{req := _Req} = _NovaReq) ->~n"
-        "    {json, #{<<\"message\">> => <<\"TODO\">>}}.~n~n",
-        [Action]
-    ).
+    atom_to_list(Action) ++
+        "(_Req) ->\n"
+        "    {json, #{~\"message\" => ~\"TODO\"}}.\n".
