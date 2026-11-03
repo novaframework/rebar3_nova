@@ -16,7 +16,14 @@
     audit_reads_the_table/1,
     openapi_reads_the_table/1,
     doctor_reads_the_table/1,
-    routes_task_prints_the_table/1
+    routes_task_prints_the_table/1,
+    audit_reports_a_wildcard_once/1,
+    audit_findings_are_sorted/1,
+    openapi_responses_follow_the_method/1,
+    openapi_schema_is_the_request_body_only/1,
+    openapi_component_schemas_drop_json_schema_keywords/1,
+    openapi_prefix_limits_the_paths/1,
+    openapi_operation_ids_are_unique/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -33,60 +40,52 @@ all() ->
         audit_reads_the_table,
         openapi_reads_the_table,
         doctor_reads_the_table,
-        routes_task_prints_the_table
+        routes_task_prints_the_table,
+        audit_reports_a_wildcard_once,
+        audit_findings_are_sorted,
+        openapi_responses_follow_the_method,
+        openapi_schema_is_the_request_body_only,
+        openapi_component_schemas_drop_json_schema_keywords,
+        openapi_prefix_limits_the_paths,
+        openapi_operation_ids_are_unique
     ].
 
 init_per_suite(Config) ->
-    application:load(nova),
+    _ = application:load(nova),
+    _ = application:load(rebar3_nova),
     application:set_env(nova, dispatch_backend, persistent_term),
-    [{dispatch, dispatch()} | Config].
+    application:set_env(rebar3_nova, router_module, rebar3_nova_test_router),
+    rebar3_nova_test_router:set_routes(routes()),
+    _ = persistent_term:erase(nova_dispatch),
+    _ = persistent_term:erase(nova_apps),
+    [{dispatch, nova_router:compile([rebar3_nova])} | Config].
 
 end_per_suite(_Config) ->
+    application:unset_env(rebar3_nova, router_module),
+    _ = persistent_term:erase(nova_dispatch),
+    _ = persistent_term:erase(nova_apps),
     ok.
 
 %%====================================================================
-%% A dispatch table covering the shapes the tasks care about
+%% A real Nova 0.18 dispatch table covering the shapes the tasks care about
 %%====================================================================
 
-dispatch() ->
-    Value = #nova_handler_value{
-        app = test_app,
-        callback = fun test_controller:index/1,
-        secure = false,
-        plugins = []
-    },
-    Trie0 = nova_routing_trie:new(#{}),
-    {ok, Trie1} = nova_routing_trie:insert('_', "/users", <<"GET">>, Value, Trie0),
-    {ok, Trie2} = nova_routing_trie:insert('_', "/users", <<"POST">>, Value, Trie1),
-    {ok, Trie3} = nova_routing_trie:insert('_', "/users/:id", <<"GET">>, Value, Trie2),
-    {ok, Trie4} = nova_routing_trie:insert(
-        '_',
-        "/assets/[...]",
-        '_',
-        Value#nova_handler_value{module = nova_file_controller},
-        Trie3
-    ),
-    {ok, Trie5} = nova_routing_trie:insert(
-        '_',
-        "/ws",
-        '_',
-        #cowboy_handler_value{
-            app = test_app,
-            handler = nova_ws_handler,
-            arguments = #{},
-            plugins = [],
-            secure = false
-        },
-        Trie4
-    ),
-    {ok, Trie6} = nova_routing_trie:insert(
-        '_',
-        404,
-        '_',
-        Value#nova_handler_value{module = nova_error_controller},
-        Trie5
-    ),
-    Trie6.
+routes() ->
+    [
+        #{
+            prefix => "",
+            security => false,
+            routes => [
+                {"/users", fun test_controller:index/1, #{methods => [get, post]}},
+                {"/users/:id", fun test_controller:index/1, #{methods => [get]}},
+                {"/heartbeat", fun(_) -> {status, 200} end, #{methods => [get]}},
+                {"/assets/[...]", "templates"},
+                {"/robots.txt", "templates/nova_plugin.template"},
+                {"/ws", test_ws, #{protocol => ws}},
+                {404, fun nova_error_controller:not_found/1, #{}}
+            ]
+        }
+    ].
 
 %%====================================================================
 %% rebar3_nova_dispatch
@@ -95,7 +94,17 @@ dispatch() ->
 routes_are_flattened(Config) ->
     Routes = rebar3_nova_dispatch:routes(?config(dispatch, Config)),
     Paths = lists:usort([Path || {Path, _Method, _Payload} <- Routes]),
-    ?assertEqual([<<"/assets/[...]">>, <<"/users">>, <<"/users/:id">>, <<"/ws">>], Paths),
+    ?assertEqual(
+        [
+            <<"/assets/[...]">>,
+            <<"/heartbeat">>,
+            <<"/robots.txt">>,
+            <<"/users">>,
+            <<"/users/:id">>,
+            <<"/ws">>
+        ],
+        Paths
+    ),
     %% /users carries two methods, so it appears twice.
     ?assertEqual(2, length([P || {P, _M, _V} <- Routes, P =:= <<"/users">>])).
 
@@ -122,17 +131,19 @@ methods_are_lowercased(_Config) ->
 %% The tasks
 %%====================================================================
 
-%% The audit skips file and error controllers and websocket handlers, and
-%% expands an any-method route across the verbs it reports on.
+%% The audit skips static files, error pages and websocket handlers. Nova
+%% 0.18 stores static routes as nova_file_controller funs with
+%% `module = undefined`, so they must be recognised from the callback.
 audit_reads_the_table(Config) ->
     Routes = rebar3_nova_audit:collect_routes(?config(dispatch, Config)),
     Paths = lists:usort([Path || {Path, _M, _S, _Mod, _Any} <- Routes]),
-    ?assertEqual([<<"/users">>, <<"/users/{id}">>], Paths),
+    ?assertEqual([<<"/heartbeat">>, <<"/users">>, <<"/users/{id}">>], Paths),
     ?assertEqual(
         [<<"get">>, <<"post">>],
         lists:usort([M || {<<"/users">>, M, _S, _Mod, _Any} <- Routes])
     ).
 
+%% Static files, error pages and inline funs have no place in an API spec.
 openapi_reads_the_table(Config) ->
     Routes = rebar3_nova_openapi:collect_routes(?config(dispatch, Config)),
     Paths = lists:usort([Path || {Path, _M, _Mod, _F, _E} <- Routes]),
@@ -142,7 +153,11 @@ openapi_reads_the_table(Config) ->
 %% The doctor reports on every route, websockets included.
 doctor_reads_the_table(Config) ->
     Handlers = rebar3_nova_doctor:collect_route_handlers(?config(dispatch, Config)),
-    ?assertEqual(5, length(Handlers)),
+    ?assertEqual(7, length(Handlers)),
+    ?assertMatch(
+        [{<<"/users/:id">>, <<"GET">>, test_controller, index, 1}],
+        [H || H = {<<"/users/:id">>, _M, _Mod, _F, _A} <- Handlers]
+    ),
     ?assertMatch(
         [{<<"/ws">>, '_', nova_ws_handler, init, 2}],
         [H || H = {<<"/ws">>, _M, _Mod, _F, _A} <- Handlers]
@@ -151,14 +166,118 @@ doctor_reads_the_table(Config) ->
 
 routes_task_prints_the_table(Config) ->
     Output = capture(fun() -> rebar3_nova_routes:print_routes(?config(dispatch, Config)) end),
-    ?assertNotEqual(nomatch, string:find(Output, "/users/:id")),
+    ?assertNotEqual(nomatch, string:find(Output, "/users/:id ")),
     ?assertNotEqual(nomatch, string:find(Output, "test_controller:index/1")),
     ?assertNotEqual(nomatch, string:find(Output, "(status 404)")),
     ?assertNotEqual(nomatch, string:find(Output, "nova_ws_handler")).
 
+audit_reports_a_wildcard_once(_Config) ->
+    Routes = [
+        {~"/any", M, false, test_controller, true}
+     || M <- [~"get", ~"post", ~"put", ~"delete", ~"patch"]
+    ],
+    {Warnings, _Infos} = rebar3_nova_audit:classify_findings(Routes),
+    Wildcards = [W || W <- Warnings, string:find(W, "Wildcard") =/= nomatch],
+    ?assertEqual(1, length(Wildcards)).
+
+audit_findings_are_sorted(_Config) ->
+    Routes = [
+        {~"/b", ~"post", false, test_controller, false},
+        {~"/a", ~"delete", false, test_controller, false},
+        {~"/a", ~"get", false, test_controller, false},
+        {~"/c", ~"get", false, test_controller, false},
+        {~"/a", ~"post", false, test_controller, false}
+    ],
+    Expected = rebar3_nova_audit:classify_findings(lists:sort(Routes)),
+    ?assertEqual(Expected, rebar3_nova_audit:classify_findings(lists:reverse(Routes))),
+    {Warnings, Infos} = Expected,
+    ?assertEqual(
+        [
+            "DELETE /a (test_controller) has no security",
+            "POST /a (test_controller) has no security",
+            "POST /b (test_controller) has no security"
+        ],
+        [lists:flatten(W) || W <- Warnings]
+    ),
+    ?assertEqual(
+        ["GET /a (test_controller) has no security", "GET /c (test_controller) has no security"],
+        [lists:flatten(I) || I <- Infos]
+    ).
+
+openapi_responses_follow_the_method(_Config) ->
+    Paths = spec_paths([
+        {~"/tags", ~"get", test_controller, list, undefined},
+        {~"/tags", ~"post", test_controller, create, undefined},
+        {~"/tags/{id}", ~"delete", test_controller, delete, undefined},
+        {~"/tags/{id}", ~"put", test_controller, update, undefined}
+    ]),
+    ?assertEqual([~"200"], response_codes(Paths, ~"/tags", ~"get")),
+    ?assertEqual([~"201"], response_codes(Paths, ~"/tags", ~"post")),
+    ?assertEqual([~"204", ~"404"], response_codes(Paths, ~"/tags/{id}", ~"delete")),
+    ?assertEqual([~"200", ~"404"], response_codes(Paths, ~"/tags/{id}", ~"put")).
+
+openapi_schema_is_the_request_body_only(_Config) ->
+    Extra = #{json_schema => "./schemas/tag.json"},
+    Paths = spec_paths([
+        {~"/tags", ~"get", test_controller, list, Extra},
+        {~"/tags", ~"post", test_controller, create, Extra}
+    ]),
+    #{~"get" := Get, ~"post" := Post} = maps:get(~"/tags", Paths),
+    ?assertNot(maps:is_key(~"requestBody", Get)),
+    ?assertMatch(
+        #{~"content" := #{~"application/json" := #{~"schema" := #{~"$ref" := _}}}},
+        maps:get(~"requestBody", Post)
+    ),
+    ?assertEqual([~"201", ~"400"], response_codes(Paths, ~"/tags", ~"post")),
+    [?assertNot(maps:is_key(~"content", R)) || R <- maps:values(maps:get(~"responses", Post))].
+
+openapi_component_schemas_drop_json_schema_keywords(_Config) ->
+    Schema = #{
+        ~"$schema" => ~"http://json-schema.org/draft-06/schema#",
+        ~"$id" => ~"tag",
+        ~"type" => ~"object",
+        ~"properties" => #{~"id" => #{~"type" => ~"integer"}}
+    },
+    ?assertEqual(
+        #{~"type" => ~"object", ~"properties" => #{~"id" => #{~"type" => ~"integer"}}},
+        rebar3_nova_openapi:component_schema(Schema)
+    ),
+    ?assertEqual(
+        #{~"type" => ~"object"},
+        rebar3_nova_openapi:component_schema(#{~"id" => ~"tag", ~"type" => ~"object"})
+    ).
+
+openapi_prefix_limits_the_paths(Config) ->
+    Dispatch = ?config(dispatch, Config),
+    Users = rebar3_nova_openapi:collect_routes(Dispatch, ~"/users"),
+    ?assertEqual(
+        [~"/users", ~"/users/{id}"], lists:usort([P || {P, _, _, _, _} <- Users])
+    ),
+    ?assertEqual([], rebar3_nova_openapi:collect_routes(Dispatch, ~"/use")),
+    ?assertEqual([], rebar3_nova_openapi:collect_routes(Dispatch, ~"/api")).
+
+openapi_operation_ids_are_unique(_Config) ->
+    Paths = spec_paths([
+        {~"/a", ~"get", test_controller, index, undefined},
+        {~"/b", ~"get", test_controller, index, undefined},
+        {~"/c", ~"get", test_controller, show, undefined}
+    ]),
+    Ids = [
+        maps:get(~"operationId", Op)
+     || Methods <- maps:values(Paths), Op <- maps:values(Methods)
+    ],
+    ?assertEqual(length(Ids), length(lists:usort(Ids))),
+    ?assert(lists:member(~"test_controller.show", Ids)).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
+
+spec_paths(Routes) ->
+    maps:get(~"paths", rebar3_nova_openapi:build_spec("t", "1", Routes, #{})).
+
+response_codes(Paths, Path, Method) ->
+    lists:sort(maps:keys(maps:get(~"responses", maps:get(Method, maps:get(Path, Paths))))).
 
 capture(Fun) ->
     Self = self(),

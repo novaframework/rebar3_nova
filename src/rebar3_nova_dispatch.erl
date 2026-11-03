@@ -12,12 +12,22 @@
 
 -export([
     routes/1,
+    handler/1,
     openapi_path/1,
     method_to_binary/1
 ]).
 
+-include("nova_router.hrl").
+
 -type route() :: {Path :: binary(), Method :: '_' | binary(), Payload :: term()}.
--export_type([route/0]).
+-type handler() ::
+    {controller, module(), atom()}
+    | {anonymous, module()}
+    | {cowboy, module()}
+    | static
+    | error_page
+    | unknown.
+-export_type([route/0, handler/0]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -35,6 +45,37 @@ routes(Dispatch) ->
      || {_Host, Path, Method, Payload} <- nova_routing_trie:routes(Dispatch),
         is_binary(Path)
     ].
+
+%%--------------------------------------------------------------------
+%% @doc
+%% What serves a route. Nova 0.18 stores every handler as a callback fun,
+%% static files and error pages included, so the module has to be read
+%% from the fun rather than from the record's `module' field.
+%% @end
+%%--------------------------------------------------------------------
+-spec handler(Payload :: term()) -> handler().
+handler(#nova_handler_value{callback = Callback}) when is_function(Callback) ->
+    fun_handler(Callback);
+handler(#nova_handler_value{module = Module, function = Function}) when
+    is_atom(Module), Module =/= undefined, is_atom(Function)
+->
+    module_handler(Module, Function);
+handler(#cowboy_handler_value{handler = Handler}) ->
+    {cowboy, Handler};
+handler(_) ->
+    unknown.
+
+fun_handler(Fun) ->
+    {module, Module} = erlang:fun_info(Fun, module),
+    {name, Name} = erlang:fun_info(Fun, name),
+    case erlang:fun_info(Fun, type) of
+        {type, external} -> module_handler(Module, Name);
+        {type, local} -> {anonymous, Module}
+    end.
+
+module_handler(nova_file_controller, _Function) -> static;
+module_handler(nova_error_controller, _Function) -> error_page;
+module_handler(Module, Function) -> {controller, Module, Function}.
 
 %%--------------------------------------------------------------------
 %% @doc

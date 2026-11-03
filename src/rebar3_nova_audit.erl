@@ -3,7 +3,7 @@
 -export([init/1, do/1, format_error/1]).
 
 %% Exported for rebar3_nova_dispatch_SUITE.
--export([collect_routes/1]).
+-export([collect_routes/1, classify_findings/1]).
 
 -include("nova_router.hrl").
 
@@ -62,76 +62,55 @@ format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
 classify_findings(Routes) ->
-    lists:foldl(
-        fun({Path, Method, Secure, Module, IsWildcard}, {WAcc, IAcc}) ->
-            MethodStr = string:uppercase(erlang:binary_to_list(Method)),
-            W1 =
-                case is_mutation(Method) andalso Secure =:= false of
-                    true ->
-                        [
-                            io_lib:format("~s ~s (~s) has no security", [MethodStr, Path, Module])
-                            | WAcc
-                        ];
-                    false ->
-                        WAcc
-                end,
-            W2 =
-                case IsWildcard of
-                    true ->
-                        [
-                            io_lib:format(
-                                "Wildcard method on ~s (~s) - all HTTP methods accepted", [
-                                    Path, Module
-                                ]
-                            )
-                            | W1
-                        ];
-                    false ->
-                        W1
-                end,
-            I1 =
-                case Method =:= <<"get">> andalso Secure =:= false of
-                    true ->
-                        [io_lib:format("GET ~s (~s) has no security", [Path, Module]) | IAcc];
-                    false ->
-                        IAcc
-                end,
-            {W2, I1}
-        end,
-        {[], []},
-        Routes
-    ).
+    Sorted = lists:sort(fun route_order/2, Routes),
+    Wildcards = lists:usort([{Path, Module} || {Path, _M, _S, Module, true} <- Sorted]),
+    Warnings =
+        [
+            io_lib:format("~s ~s (~s) has no security", [method_label(Method), Path, Module])
+         || {Path, Method, false, Module, _Any} <- Sorted,
+            is_mutation(Method)
+        ] ++
+            [
+                io_lib:format("Wildcard method on ~s (~s) - all HTTP methods accepted", [
+                    Path, Module
+                ])
+             || {Path, Module} <- Wildcards
+            ],
+    Infos = [
+        io_lib:format("GET ~s (~s) has no security", [Path, Module])
+     || {Path, ~"get", false, Module, _Any} <- Sorted
+    ],
+    {Warnings, Infos}.
 
-is_mutation(<<"post">>) -> true;
-is_mutation(<<"put">>) -> true;
-is_mutation(<<"delete">>) -> true;
-is_mutation(<<"patch">>) -> true;
+route_order({PathA, MethodA, _, _, _}, {PathB, MethodB, _, _, _}) ->
+    {PathA, MethodA} =< {PathB, MethodB}.
+
+method_label(Method) ->
+    string:uppercase(binary_to_list(Method)).
+
+is_mutation(~"post") -> true;
+is_mutation(~"put") -> true;
+is_mutation(~"delete") -> true;
+is_mutation(~"patch") -> true;
 is_mutation(_) -> false.
 
 collect_routes(Dispatch) ->
     lists:flatmap(fun classify_route/1, rebar3_nova_dispatch:routes(Dispatch)).
 
-classify_route({_Path, _Method, #nova_handler_value{module = nova_file_controller}}) ->
-    [];
-classify_route({_Path, _Method, #nova_handler_value{module = nova_error_controller}}) ->
-    [];
-classify_route(
-    {Path, Method, #nova_handler_value{
-        module = undefined,
-        function = undefined,
-        callback = Callback,
-        secure = Secure
-    }}
-) ->
-    {module, Module} = lists:keyfind(module, 1, erlang:fun_info(Callback)),
-    expand_methods(Method, rebar3_nova_dispatch:openapi_path(Path), Module, Secure);
-classify_route({Path, Method, #nova_handler_value{module = Module, secure = Secure}}) ->
-    expand_methods(Method, rebar3_nova_dispatch:openapi_path(Path), Module, Secure);
-classify_route({_Path, _Method, #cowboy_handler_value{}}) ->
+classify_route({Path, Method, #nova_handler_value{secure = Secure} = Value}) ->
+    case rebar3_nova_dispatch:handler(Value) of
+        {controller, Module, _Function} ->
+            expand_methods(Method, rebar3_nova_dispatch:openapi_path(Path), Module, Secure);
+        {anonymous, Module} ->
+            expand_methods(Method, rebar3_nova_dispatch:openapi_path(Path), Module, Secure);
+        _StaticOrErrorPage ->
+            []
+    end;
+classify_route({_Path, _Method, _CowboyHandler}) ->
     [].
 
 expand_methods('_', Path, Module, Secure) ->
-    Methods = [<<"get">>, <<"post">>, <<"put">>, <<"delete">>, <<"patch">>],
+    Methods = [~"get", ~"post", ~"put", ~"delete", ~"patch"],
     [{Path, M, Secure, Module, true} || M <- Methods];
 expand_methods(Method, Path, Module, Secure) ->
     [{Path, rebar3_nova_dispatch:method_to_binary(Method), Secure, Module, false}].
