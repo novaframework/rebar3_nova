@@ -1,0 +1,37 @@
+-module({{app}}_accounts).
+-include_lib("kura/include/kura.hrl").
+
+-export([
+    register/1,
+    authenticate/2,
+    issue_token/1,
+    user_for_token/1,
+    revoke_token/1
+]).
+
+-spec register(map()) -> {ok, map()} | {error, #kura_changeset{}}.
+register(Params) when is_map(Params) ->
+    nova_auth_accounts:register({{app}}_auth, Params).
+
+-spec authenticate(term(), term()) -> {ok, map()} | {error, invalid_credentials | unconfirmed}.
+authenticate(Email, Password) when is_binary(Email), is_binary(Password) ->
+    case {{app}}_user:normalize_email(Email) of
+        {ok, Normalized} -> nova_auth_accounts:authenticate({{app}}_auth, Normalized, Password);
+        error -> {error, invalid_credentials}
+    end;
+authenticate(_Email, _Password) ->
+    {error, invalid_credentials}.
+
+-spec issue_token(map()) -> {ok, binary()} | {error, term()}.
+issue_token(User) ->
+    nova_auth_session:generate_session_token({{app}}_auth, User).
+
+-spec user_for_token(term()) -> {ok, map()} | {error, term()}.
+user_for_token(Token) when is_binary(Token) ->
+    nova_auth_session:get_user_by_session_token({{app}}_auth, Token);
+user_for_token(_Token) ->
+    {error, not_found}.
+
+-spec revoke_token(binary()) -> ok.
+revoke_token(Token) ->
+    nova_auth_session:delete_session_token({{app}}_auth, Token).

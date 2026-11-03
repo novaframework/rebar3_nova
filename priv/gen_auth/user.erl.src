@@ -1,0 +1,112 @@
+-module({{app}}_user).
+-behaviour(kura_schema).
+-include_lib("kura/include/kura.hrl").
+
+-export([table/0, fields/0, indexes/0]).
+-export([registration_changeset/2, password_changeset/2, normalize_email/1]).
+
+-define(MIN_PASSWORD_LENGTH, 12).
+
+-spec table() -> binary().
+table() -> ~"users".
+
+-spec fields() -> [#kura_field{}].
+fields() ->
+    [
+        #kura_field{name = id, type = id, primary_key = true, nullable = false},
+        #kura_field{name = email, type = string, nullable = false},
+        #kura_field{name = hashed_password, type = string, nullable = false},
+        #kura_field{name = confirmed_at, type = utc_datetime},
+        #kura_field{name = inserted_at, type = utc_datetime},
+        #kura_field{name = updated_at, type = utc_datetime},
+        #kura_field{name = password, type = string, virtual = true}
+    ].
+
+-spec indexes() -> [{[atom()], map()}].
+indexes() ->
+    [{[email], #{unique => true}}].
+
+%% Used by nova_auth_accounts:register/2.
+-spec registration_changeset(map(), map()) -> #kura_changeset{}.
+registration_changeset(Data, Params) ->
+    CS = kura_changeset:cast(?MODULE, Data, Params, [email, password]),
+    CS1 = kura_changeset:validate_required(CS, [email, password]),
+    hash_password(validate_password(validate_email(CS1))).
+
+%% Used by nova_auth_accounts:change_password/4.
+-spec password_changeset(map(), map()) -> #kura_changeset{}.
+password_changeset(Data, Params) ->
+    CS = kura_changeset:cast(?MODULE, Data, Params, [password]),
+    CS1 = kura_changeset:validate_required(CS, [password]),
+    hash_password(validate_password(CS1)).
+
+%% Emails are stored normalised, so the unique index sees one address
+%% whatever its case. Normalise a login email the same way before
+%% nova_auth_accounts:authenticate/3.
+-spec normalize_email(term()) -> {ok, binary()} | error.
+normalize_email(Email) when is_binary(Email) ->
+    case unicode:characters_to_nfc_binary(Email) of
+        Nfc when is_binary(Nfc) -> {ok, string:lowercase(Nfc)};
+        _ -> error
+    end;
+normalize_email(_) ->
+    error.
+
+validate_email(CS) ->
+    case kura_changeset:get_change(CS, email) of
+        undefined ->
+            CS;
+        Email ->
+            case normalize_email(Email) of
+                {ok, Normalized} ->
+                    CS1 = kura_changeset:put_change(CS, email, Normalized),
+                    CS2 = kura_changeset:validate_length(CS1, email, [{max, 254}]),
+                    kura_changeset:unique_constraint(check_address(CS2, Normalized), email);
+                error ->
+                    kura_changeset:add_error(CS, email, ~"is not valid UTF-8")
+            end
+    end.
+
+%% One @ between a non-empty local part and domain. Anything stricter is
+%% better left to a confirmation email.
+check_address(CS, Email) ->
+    case binary:split(Email, ~"@", [global]) of
+        [Local, Domain] when Local =/= ~"", Domain =/= ~"" -> CS;
+        _ -> kura_changeset:add_error(CS, email, ~"must be one name, @ and a domain")
+    end.
+
+%% Counted in code points; kura_changeset:validate_length/3 counts bytes.
+validate_password(CS) ->
+    case kura_changeset:get_change(CS, password) of
+        Password when is_binary(Password) ->
+            check_length(CS, unicode:characters_to_list(Password));
+        _ ->
+            CS
+    end.
+
+check_length(CS, Chars) when is_list(Chars), length(Chars) >= ?MIN_PASSWORD_LENGTH ->
+    CS;
+check_length(CS, Chars) when is_list(Chars) ->
+    Message = io_lib:format("should be at least ~B characters", [?MIN_PASSWORD_LENGTH]),
+    kura_changeset:add_error(CS, password, iolist_to_binary(Message));
+check_length(CS, _Invalid) ->
+    kura_changeset:add_error(CS, password, ~"is not valid UTF-8").
+
+%% Hashes with nova_auth, then drops the plaintext from the changeset so it
+%% does not reach a log in {error, Changeset}.
+hash_password(#kura_changeset{valid = true} = CS) ->
+    case kura_changeset:get_change(CS, password) of
+        undefined ->
+            CS;
+        Password ->
+            Hashed = nova_auth_password:hash(Password),
+            scrub_password(kura_changeset:put_change(CS, hashed_password, Hashed))
+    end;
+hash_password(CS) ->
+    scrub_password(CS).
+
+scrub_password(#kura_changeset{changes = Changes, params = Params} = CS) ->
+    Secret = [password, ~"password"],
+    CS#kura_changeset{
+        changes = maps:without(Secret, Changes), params = maps:without(Secret, Params)
+    }.

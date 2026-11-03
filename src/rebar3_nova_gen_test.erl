@@ -2,6 +2,9 @@
 
 -export([init/1, do/1, format_error/1]).
 
+%% Exported for rebar3_nova_gen_SUITE.
+-export([controller_routes/2, generate_content/3]).
+
 -define(PROVIDER, gen_test).
 -define(DEPS, [{default, compile}]).
 
@@ -31,7 +34,22 @@ do(State) ->
         Name ->
             AppName = rebar3_nova_utils:get_app_name(State),
             AppDir = rebar3_nova_utils:get_app_dir(State),
-            generate(AppName, AppDir, Name),
+            Controller = list_to_atom(
+                lists:flatten(io_lib:format("~s_~s_controller", [AppName, Name]))
+            ),
+            Dispatch = rebar3_nova_utils:compile_routes(State, AppName),
+            Routes =
+                case controller_routes(Dispatch, Controller) of
+                    [] ->
+                        rebar_api:warn(
+                            "No routes for ~s found; the suite assumes the gen_resource routes under /~s",
+                            [Controller, Name]
+                        ),
+                        default_routes(Name);
+                    Found ->
+                        Found
+                end,
+            generate(AppName, AppDir, Name, Routes),
             {ok, State}
     end.
 
@@ -39,38 +57,139 @@ do(State) ->
 format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
-generate(AppName, AppDir, Name) ->
-    SuiteName = io_lib:format("~s_~s_controller_SUITE", [AppName, Name]),
-    FileName = filename:join([AppDir, "test", lists:flatten(SuiteName) ++ ".erl"]),
-    Content = generate_content(lists:flatten(SuiteName), AppName, Name),
+-type route() :: {Method :: binary(), Path :: binary(), Function :: atom()}.
+
+-doc "The routes served by `Controller` in a compiled dispatch table, in path order.".
+-spec controller_routes(nova_routing_trie:trie(), module()) -> [route()].
+controller_routes(Dispatch, Controller) ->
+    lists:sort(
+        lists:append([
+            controller_route(Path, Method, Payload, Controller)
+         || {Path, Method, Payload} <- rebar3_nova_dispatch:routes(Dispatch)
+        ])
+    ).
+
+-spec controller_route(binary(), '_' | binary(), term(), module()) -> [route()].
+controller_route(Path, Method, Payload, Controller) ->
+    case rebar3_nova_dispatch:handler(Payload) of
+        {controller, Controller, Function} ->
+            [{rebar3_nova_dispatch:method_to_binary(Method), Path, Function}];
+        _ ->
+            []
+    end.
+
+default_routes(Name) ->
+    Base = rebar3_nova_utils:to_binary("/" ++ Name),
+    [
+        {~"get", Base, list},
+        {~"get", <<Base/binary, "/:id">>, show},
+        {~"post", Base, create},
+        {~"put", <<Base/binary, "/:id">>, update},
+        {~"delete", <<Base/binary, "/:id">>, delete}
+    ].
+
+generate(AppName, AppDir, Name, Routes) ->
+    SuiteName = lists:flatten(io_lib:format("~s_~s_controller_SUITE", [AppName, Name])),
+    FileName = filename:join([AppDir, "test", SuiteName ++ ".erl"]),
+    Content = generate_content(SuiteName, AppName, Routes),
     rebar3_nova_utils:write_file_if_not_exists(FileName, Content).
 
-generate_content(SuiteName, AppName, Name) ->
-    iolist_to_binary(
-        io_lib:format(
-            "-module(~s).~n"
-            "-include_lib(\"common_test/include/ct.hrl\").~n~n"
-            "-export([all/0, init_per_suite/1, end_per_suite/1]).~n"
-            "-export([test_list/1, test_show/1, test_create/1, test_update/1, test_delete/1]).~n~n"
-            "all() ->~n"
-            "    [test_list, test_show, test_create, test_update, test_delete].~n~n"
-            "init_per_suite(Config) ->~n"
-            "    application:ensure_all_started(inets),~n"
-            "    application:ensure_all_started(~s),~n"
-            "    Config.~n~n"
-            "end_per_suite(_Config) ->~n"
-            "    application:stop(~s),~n"
-            "    ok.~n~n"
-            "test_list(_Config) ->~n"
-            "    {ok, {{_, 200, _}, _, _}} = httpc:request(\"http://localhost:8080/~s\").~n~n"
-            "test_show(_Config) ->~n"
-            "    {ok, {{_, 200, _}, _, _}} = httpc:request(\"http://localhost:8080/~s/1\").~n~n"
-            "test_create(_Config) ->~n"
-            "    {ok, {{_, 201, _}, _, _}} = httpc:request(post, {\"http://localhost:8080/~s\", [], \"application/json\", \"{}\"}, [], []).~n~n"
-            "test_update(_Config) ->~n"
-            "    {ok, {{_, 200, _}, _, _}} = httpc:request(put, {\"http://localhost:8080/~s/1\", [], \"application/json\", \"{}\"}, [], []).~n~n"
-            "test_delete(_Config) ->~n"
-            "    {ok, {{_, 204, _}, _, _}} = httpc:request(delete, {\"http://localhost:8080/~s/1\", []}, [], []).~n",
-            [SuiteName, AppName, AppName, Name, Name, Name, Name, Name]
-        )
-    ).
+-doc """
+A suite with one case per route. It reads the port from the nova
+`cowboy_configuration` the tests run with, uses `1` for path bindings and
+sends a body matching the gen_resource schema, so it passes against the
+generated controller as it is.
+""".
+-spec generate_content(string(), atom(), [route()]) -> binary().
+generate_content(SuiteName, AppName, Routes) ->
+    Cases = test_cases(Routes),
+    App = atom_to_list(AppName),
+    Names = [Case || {Case, _, _, _} <- Cases],
+    rebar3_nova_utils:to_binary([
+        "-module(",
+        SuiteName,
+        ").\n"
+        "\n"
+        "-include_lib(\"common_test/include/ct.hrl\").\n"
+        "-include_lib(\"stdlib/include/assert.hrl\").\n"
+        "\n"
+        "-export([all/0, init_per_suite/1, end_per_suite/1]).\n"
+        "-export([\n",
+        string:join(["    " ++ N ++ "/1" || N <- Names], ",\n"),
+        "\n"
+        "]).\n"
+        "\n"
+        "all() ->\n"
+        "    [\n",
+        string:join(["        " ++ N || N <- Names], ",\n"),
+        "\n"
+        "    ].\n"
+        "\n"
+        "init_per_suite(Config) ->\n"
+        "    {ok, _} = application:ensure_all_started(inets),\n"
+        "    {ok, _} = application:ensure_all_started(",
+        App,
+        "),\n"
+        "    Config.\n"
+        "\n"
+        "end_per_suite(_Config) ->\n"
+        "    ok = application:stop(",
+        App,
+        ").\n",
+        [test_case(Case) || Case <- Cases],
+        "\n"
+        "request(Method, Path) ->\n"
+        "    httpc:request(Method, {url(Path), []}, [], []).\n"
+        "\n"
+        "request(Method, Path, Body) ->\n"
+        "    httpc:request(Method, {url(Path), [], \"application/json\", Body}, [], []).\n"
+        "\n"
+        "url(Path) ->\n"
+        "    Cowboy = application:get_env(nova, cowboy_configuration, #{}),\n"
+        "    \"http://localhost:\" ++ integer_to_list(maps:get(port, Cowboy, 8080)) ++ Path.\n"
+    ]).
+
+test_cases(Routes) ->
+    Named = [{"test_" ++ atom_to_list(F), M, P} || {M, P, F} <- Routes],
+    Shared = [Name || {Name, _, _} <- Named] -- lists:usort([Name || {Name, _, _} <- Named]),
+    [
+        {case_name(Name, Method, Shared), Method, request_path(Path), expected_status(Method)}
+     || {Name, Method, Path} <- Named
+    ].
+
+case_name(Name, Method, Shared) ->
+    case lists:member(Name, Shared) of
+        true -> Name ++ "_" ++ binary_to_list(Method);
+        false -> Name
+    end.
+
+request_path(Path) ->
+    string:join([binding_value(S) || S <- binary:split(Path, ~"/", [global])], "/").
+
+binding_value(<<":", _/binary>>) -> "1";
+binding_value(Segment) -> binary_to_list(Segment).
+
+expected_status(~"post") -> "201";
+expected_status(~"delete") -> "204";
+expected_status(_) -> "200".
+
+test_case({Name, Method, Path, Status}) ->
+    Request =
+        case Method of
+            M when M =:= ~"post"; M =:= ~"put"; M =:= ~"patch" ->
+                ["request(", M, ", \"", Path, "\", ~\"{\\\"name\\\": \\\"test\\\"}\")"];
+            ~"any" ->
+                ["request(get, \"", Path, "\")"];
+            M ->
+                ["request(", M, ", \"", Path, "\")"]
+        end,
+    [
+        "\n",
+        Name,
+        "(_Config) ->\n"
+        "    ?assertMatch({ok, {{_, ",
+        Status,
+        ", _}, _, _}}, ",
+        Request,
+        ").\n"
+    ].

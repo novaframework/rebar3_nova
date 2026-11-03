@@ -2,6 +2,9 @@
 
 -export([init/1, do/1, format_error/1]).
 
+%% Exported for rebar3_nova_middleware_SUITE.
+-export([format_route/1]).
+
 -define(PROVIDER, middleware).
 -define(DEPS, [{default, compile}]).
 
@@ -31,7 +34,8 @@ do(State) ->
     io:format("~n=== Global Plugins ===~n"),
     print_plugins(GlobalPlugins, "  "),
 
-    Router = erlang:list_to_atom(lists:flatten(io_lib:format("~s_router", [AppName]))),
+    _ = application:load(AppName),
+    Router = rebar3_nova_utils:router_module(AppName),
     Groups = get_routes(Router, Env),
 
     io:format("~n=== Route Groups (~s) ===~n", [Router]),
@@ -78,29 +82,48 @@ print_groups(Groups, GlobalPlugins) ->
             end,
 
             io:format("  Routes:~n"),
-            lists:foreach(fun(Route) -> print_route(Route) end, Routes)
+            lists:foreach(fun(Route) -> io:format("    ~ts~n", [format_route(Route)]) end, Routes)
         end,
         Groups
     ).
 
-print_route({Path, Handler, Opts}) ->
+-doc "One route from a router's `routes` list, as a line of text.".
+-spec format_route(term()) -> unicode:chardata().
+format_route({StatusCode, Handler, _Opts}) when is_integer(StatusCode) ->
+    io_lib:format("STATUS ~b -> ~ts", [StatusCode, format_handler(Handler)]);
+format_route({Path, Module, #{protocol := ws}}) when is_atom(Module) ->
+    io_lib:format("WS ~ts -> ~ts (websocket)", [Path, Module]);
+format_route({Path, LocalPath, _Opts}) when is_list(LocalPath) ->
+    io_lib:format("STATIC ~ts -> ~ts", [Path, LocalPath]);
+format_route({Path, LocalPath}) when is_list(LocalPath) ->
+    io_lib:format("STATIC ~ts -> ~ts", [Path, LocalPath]);
+format_route({Path, Handler, Opts}) when is_map(Opts) ->
     Methods = maps:get(methods, Opts, ['_']),
-    HandlerStr = format_handler(Handler),
-    MethodsStr = format_methods(Methods),
-    io:format("    ~s ~s -> ~s~n", [MethodsStr, Path, HandlerStr]);
-print_route({Path, Handler}) ->
-    HandlerStr = format_handler(Handler),
-    io:format("    ALL ~s -> ~s~n", [Path, HandlerStr]).
+    io_lib:format("~ts ~ts -> ~ts", [format_methods(Methods), Path, format_handler(Handler)]);
+format_route({Path, Handler}) ->
+    io_lib:format("ALL ~ts -> ~ts", [Path, format_handler(Handler)]);
+format_route(Other) ->
+    io_lib:format("~0p", [Other]).
 
 format_handler(Fun) when is_function(Fun) ->
-    {module, Mod} = lists:keyfind(module, 1, erlang:fun_info(Fun)),
-    {name, Name} = lists:keyfind(name, 1, erlang:fun_info(Fun)),
-    io_lib:format("~s:~s", [Mod, Name]);
-format_handler({Mod, Fun}) ->
-    io_lib:format("~s:~s", [Mod, Fun]).
+    {module, Mod} = erlang:fun_info(Fun, module),
+    {name, Name} = erlang:fun_info(Fun, name),
+    case erlang:fun_info(Fun, type) of
+        {type, external} -> io_lib:format("~ts:~ts", [Mod, Name]);
+        {type, local} -> io_lib:format("fun in ~ts", [Mod])
+    end;
+format_handler({Mod, Fun}) when is_atom(Mod), is_atom(Fun) ->
+    io_lib:format("~ts:~ts", [Mod, Fun]);
+format_handler(Other) ->
+    io_lib:format("~0p", [Other]).
 
 format_methods(Methods) ->
-    string:join([string:uppercase(erlang:atom_to_list(M)) || M <- Methods], ",").
+    lists:join(",", [format_method(M) || M <- Methods]).
+
+format_method('_') -> "ALL";
+format_method(Method) when is_atom(Method) -> string:uppercase(atom_to_list(Method));
+format_method(Method) when is_binary(Method) -> string:uppercase(Method);
+format_method(Method) -> io_lib:format("~0p", [Method]).
 
 print_plugins([], _Indent) ->
     io:format("~s(none)~n", [_Indent]);

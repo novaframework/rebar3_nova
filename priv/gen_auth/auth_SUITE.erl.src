@@ -1,0 +1,169 @@
+-module({{app}}_auth_SUITE).
+
+-include_lib("common_test/include/ct.hrl").
+-include_lib("stdlib/include/assert.hrl").
+
+-export([all/0, init_per_suite/1, end_per_suite/1, init_per_testcase/2, end_per_testcase/2]).
+-export([
+    register_login_and_logout/1,
+    wrong_password_is_rejected/1,
+    unknown_email_is_rejected_like_a_wrong_password/1,
+    short_password_is_rejected/1,
+    me_needs_a_token/1,
+    me_needs_an_authorization_header/1,
+    large_body_is_refused/1,
+    logins_from_one_address_are_limited/1,
+    logins_for_one_email_are_limited/1,
+    bearer_routes_do_not_read_an_unauthenticated_body/1
+]).
+
+all() ->
+    [
+        register_login_and_logout,
+        wrong_password_is_rejected,
+        unknown_email_is_rejected_like_a_wrong_password,
+        short_password_is_rejected,
+        me_needs_a_token,
+        me_needs_an_authorization_header,
+        large_body_is_refused,
+        logins_from_one_address_are_limited,
+        logins_for_one_email_are_limited,
+        bearer_routes_do_not_read_an_unauthenticated_body
+    ].
+
+%% The suite connects from 127.0.0.1 and trusts it as a proxy, so each test
+%% names its own client in x-forwarded-for and the rate limits never carry
+%% over between tests or runs.
+init_per_suite(Config) ->
+    {ok, _} = application:ensure_all_started(inets),
+    {ok, _} = application:ensure_all_started({{app}}),
+    {ok, _} = kura_migrator:migrate({{app}}_repo),
+    Proxies = application:get_env(nova_auth, trusted_proxies),
+    ok = application:set_env(nova_auth, trusted_proxies, [{127, 0, 0, 1}]),
+    [{trusted_proxies, Proxies} | Config].
+
+end_per_suite(Config) ->
+    case ?config(trusted_proxies, Config) of
+        {ok, Proxies} -> application:set_env(nova_auth, trusted_proxies, Proxies);
+        undefined -> application:unset_env(nova_auth, trusted_proxies)
+    end,
+    ok = application:stop({{app}}).
+
+%% A random /64 in the IPv6 documentation range; the limits count per /64.
+init_per_testcase(_TestCase, Config) ->
+    Prefix = [rand:uniform(65536) - 1 || _ <- [1, 2]],
+    Client = list_to_tuple([16#2001, 16#db8 | Prefix] ++ [0, 0, 0, 1]),
+    [{client, inet:ntoa(Client)} | Config].
+
+end_per_testcase(_TestCase, _Config) ->
+    ok.
+
+register_login_and_logout(Config) ->
+    Email = unique_email(),
+    {201, #{~"email" := Email}} = post(Config, "/api/users", registration(Email, password())),
+    {201, Headers, #{~"token" := Token}} =
+        send(post, login_request(Config, Email, password())),
+    ?assertEqual("no-store", proplists:get_value("cache-control", Headers)),
+    ?assertMatch({200, #{~"email" := Email}}, request(Config, get, "/api/me", Token)),
+    ?assertMatch({204, _}, request(Config, delete, "/api/tokens", Token)),
+    ?assertMatch({401, _}, request(Config, get, "/api/me", Token)).
+
+wrong_password_is_rejected(Config) ->
+    Email = unique_email(),
+    {201, _} = post(Config, "/api/users", registration(Email, password())),
+    ?assertMatch({401, _}, login(Config, Email, ~"not the password")).
+
+%% The same answer for both, so a login does not tell which emails have accounts.
+unknown_email_is_rejected_like_a_wrong_password(Config) ->
+    Email = unique_email(),
+    {201, _} = post(Config, "/api/users", registration(Email, password())),
+    {401, WrongPassword} = login(Config, Email, ~"not the password"),
+    ?assertEqual({401, WrongPassword}, login(Config, unique_email(), ~"not the password")).
+
+short_password_is_rejected(Config) ->
+    ?assertMatch(
+        {422, #{~"errors" := #{~"password" := [_ | _]}}},
+        post(Config, "/api/users", registration(unique_email(), ~"short"))
+    ).
+
+me_needs_a_token(Config) ->
+    ?assertMatch({401, _}, request(Config, get, "/api/me", ~"invalid")).
+
+me_needs_an_authorization_header(Config) ->
+    ?assertMatch({401, _, _}, send(get, {url("/api/me"), headers(Config)})).
+
+large_body_is_refused(Config) ->
+    Body = binary:copy(~"a", 65537),
+    ?assertMatch(
+        {413, _, _}, send(post, {url("/api/users"), headers(Config), "application/json", Body})
+    ).
+
+%% A fresh email each time, so only the per-address limit applies.
+logins_from_one_address_are_limited(Config) ->
+    Statuses = [status(login(Config, unique_email(), ~"guess")) || _ <- lists:seq(1, 11)],
+    ?assertEqual(lists:duplicate(10, 401) ++ [429], Statuses).
+
+logins_for_one_email_are_limited(Config) ->
+    Email = unique_email(),
+    Statuses = [status(login(Config, Email, ~"guess")) || _ <- lists:seq(1, 6)],
+    ?assertEqual(lists:duplicate(5, 401) ++ [429], Statuses).
+
+%% Nova's nova_request_plugin refuses a body over 1 MB with 413 before
+%% reading it. Here security must answer first: a bearer group that
+%% inherits a global body decoder would read the body of a request without
+%% a token.
+bearer_routes_do_not_read_an_unauthenticated_body(Config) ->
+    Body = binary:copy(~"a", 1000001),
+    ?assertMatch(
+        {401, _, _},
+        send(delete, {url("/api/tokens"), headers(Config), "application/json", Body})
+    ).
+
+%% The users stay in the database, so each run needs fresh addresses.
+unique_email() ->
+    iolist_to_binary([
+        ~"user-", binary:encode_hex(crypto:strong_rand_bytes(8), lowercase), ~"@example.com"
+    ]).
+
+password() ->
+    ~"correct horse battery staple".
+
+registration(Email, Password) ->
+    #{email => Email, password => Password}.
+
+login(Config, Email, Password) ->
+    without_headers(send(post, login_request(Config, Email, Password))).
+
+login_request(Config, Email, Password) ->
+    Body = json:encode(#{email => Email, password => Password}),
+    {url("/api/tokens"), headers(Config), "application/json", Body}.
+
+post(Config, Path, Body) ->
+    Request = {url(Path), headers(Config), "application/json", json:encode(Body)},
+    without_headers(send(post, Request)).
+
+request(Config, Method, Path, Token) ->
+    Headers = [{"authorization", "Bearer " ++ binary_to_list(Token)} | headers(Config)],
+    without_headers(send(Method, {url(Path), Headers})).
+
+headers(Config) ->
+    [{"x-forwarded-for", ?config(client, Config)}].
+
+send(Method, Request) ->
+    response(httpc:request(Method, Request, [], [{body_format, binary}])).
+
+response({ok, {{_, Status, _}, Headers, Body}}) ->
+    case proplists:get_value("content-type", Headers) of
+        "application/json" ++ _ -> {Status, Headers, json:decode(Body)};
+        _ -> {Status, Headers, Body}
+    end.
+
+without_headers({Status, _Headers, Body}) ->
+    {Status, Body}.
+
+status({Status, _Body}) ->
+    Status.
+
+url(Path) ->
+    Cowboy = application:get_env(nova, cowboy_configuration, #{}),
+    "http://127.0.0.1:" ++ integer_to_list(maps:get(port, Cowboy, 8080)) ++ Path.
