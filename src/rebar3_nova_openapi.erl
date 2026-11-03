@@ -31,7 +31,7 @@ init(State) ->
         {example, "rebar3 nova openapi --prefix /api"},
         {opts, [
             {output, $o, "output", string,
-                "Output file path (default: priv/openapi/openapi.json, which is not served)"},
+                "Output file path (default: priv/assets/openapi.json, served under /assets)"},
             {title, $t, "title", string, "API title (default: app name)"},
             {api_version, $v, "api-version", {string, "0.1.0"}, "API version"},
             {prefix, $p, "prefix", string,
@@ -82,12 +82,12 @@ format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
 -doc """
-Where the spec goes without `--output`. Not `priv/assets`, which the
-scaffold serves, so the route map is only published on purpose.
+Where the spec goes without `--output`: `priv/assets`, which the scaffold
+serves under `/assets`. Pass `--output` to keep it private.
 """.
 -spec default_output(file:filename_all()) -> file:filename_all().
 default_output(AppDir) ->
-    filename:join([AppDir, "priv", "openapi", "openapi.json"]).
+    filename:join([AppDir, "priv", "assets", "openapi.json"]).
 
 %% ===================================================================
 %% Route collection
