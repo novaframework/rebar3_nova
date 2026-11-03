@@ -8,7 +8,8 @@
     build_spec/4,
     component_schema/1,
     component_names/1,
-    load_schemas/1
+    load_schemas/1,
+    default_output/1
 ]).
 
 -include("nova_router.hrl").
@@ -29,7 +30,8 @@ init(State) ->
         {deps, ?DEPS},
         {example, "rebar3 nova openapi --prefix /api"},
         {opts, [
-            {output, $o, "output", string, "Output file path (default: priv/assets/openapi.json)"},
+            {output, $o, "output", string,
+                "Output file path (default: priv/openapi/openapi.json, which is not served)"},
             {title, $t, "title", string, "API title (default: app name)"},
             {api_version, $v, "api-version", {string, "0.1.0"}, "API version"},
             {prefix, $p, "prefix", string,
@@ -51,7 +53,7 @@ do(State) ->
     {Args, _} = rebar_state:command_parsed_args(State),
     Output =
         case proplists:get_value(output, Args) of
-            undefined -> filename:join([AppDir, "priv", "assets", "openapi.json"]);
+            undefined -> default_output(AppDir);
             O -> O
         end,
     Title =
@@ -77,6 +79,14 @@ do(State) ->
 -spec format_error(any()) -> iolist().
 format_error(Reason) ->
     io_lib:format("~p", [Reason]).
+
+-doc """
+Where the spec goes without `--output`. Not `priv/assets`, which the
+scaffold serves, so the route map is only published on purpose.
+""".
+-spec default_output(file:filename()) -> file:filename().
+default_output(AppDir) ->
+    filename:join([AppDir, "priv", "openapi", "openapi.json"]).
 
 %% ===================================================================
 %% Route collection

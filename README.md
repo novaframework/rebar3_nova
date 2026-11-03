@@ -141,9 +141,9 @@ Generates an OpenAPI 3.0.3 JSON specification from compiled controller routes an
 
 ```
 $ rebar3 nova openapi
-===> OpenAPI spec written to /path/to/myapp/priv/assets/openapi.json
+===> OpenAPI spec written to /path/to/myapp/priv/openapi/openapi.json
 
-$ rebar3 nova openapi --prefix /api --output priv/openapi/openapi.json
+$ rebar3 nova openapi --prefix /api --output priv/assets/openapi.json
 $ rebar3 nova openapi --title "My API" --api-version 1.0.0
 ```
 
@@ -151,14 +151,14 @@ $ rebar3 nova openapi --title "My API" --api-version 1.0.0
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
-| `--output`, `-o` | no | `priv/assets/openapi.json` | Output file path |
+| `--output`, `-o` | no | `priv/openapi/openapi.json` | Output file path |
 | `--title`, `-t` | no | app name | API title |
 | `--api-version`, `-v` | no | `0.1.0` | API version string |
 | `--prefix`, `-p` | no | (every route) | Only document paths under this prefix, e.g. `/api` |
 
 Responses follow the method: `201` for POST, `204` for DELETE and `200` otherwise, plus `400` when the route has a request schema and `404` when the path has parameters. A route's `extra_state => #{json_schema => "schemas/x.json"}`, the key [nova_json_schemas](https://github.com/novaframework/nova_json_schemas) validates request bodies with, becomes the request body schema of POST, PUT and PATCH operations; it is not used to describe responses. Schemas are read from `priv/schemas` and its subdirectories and named by their relative path, so `priv/schemas/v1/user.json` is the component `v1.user`. `$schema` and `$id` are dropped from the component schemas, which OpenAPI 3.0 does not allow.
 
-The default output directory, `priv/assets`, is what the scaffold serves under `/assets`, so the spec is public there; pass `--output` to keep it elsewhere. No Swagger UI page is written: earlier versions wrote a `swagger.html` that loaded Swagger UI from a CDN. Serve a self-hosted copy if you want one.
+The spec lists every route, so by default it goes to `priv/openapi`, which the scaffold does not serve. To publish it, pass `--output` explicitly, e.g. `--output priv/assets/openapi.json` to serve it under `/assets`. No Swagger UI page is written: earlier versions wrote a `swagger.html` that loaded Swagger UI from a CDN. Serve a self-hosted copy if you want one.
 
 ### `nova middleware` — Show plugin/middleware chains
 

@@ -27,7 +27,8 @@
     openapi_nested_schemas_are_loaded_by_relative_path/1,
     openapi_same_basename_schemas_do_not_collide/1,
     openapi_component_name_collision_is_an_error/1,
-    openapi_unknown_schema_gets_no_ref/1
+    openapi_unknown_schema_gets_no_ref/1,
+    openapi_default_output_is_not_served/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -54,7 +55,8 @@ all() ->
         openapi_nested_schemas_are_loaded_by_relative_path,
         openapi_same_basename_schemas_do_not_collide,
         openapi_component_name_collision_is_an_error,
-        openapi_unknown_schema_gets_no_ref
+        openapi_unknown_schema_gets_no_ref,
+        openapi_default_output_is_not_served
     ].
 
 init_per_suite(Config) ->
@@ -402,3 +404,9 @@ collect_output(Ref, Acc) ->
     after 0 ->
         lists:flatten(lists:reverse(Acc))
     end.
+
+%% The scaffold serves priv/assets under /assets.
+openapi_default_output_is_not_served(_Config) ->
+    Output = rebar3_nova_openapi:default_output("/app"),
+    ?assertEqual("/app/priv/openapi/openapi.json", Output),
+    ?assertEqual(nomatch, string:find(Output, "priv/assets")).
