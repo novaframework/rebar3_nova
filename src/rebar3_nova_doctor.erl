@@ -2,8 +2,10 @@
 
 -export([init/1, do/1, format_error/1]).
 
+%% Exported for rebar3_nova_dispatch_SUITE.
+-export([collect_route_handlers/1]).
+
 -include("nova_router.hrl").
--include_lib("routing_tree/include/routing_tree.hrl").
 
 -ifdef(TEST).
 -export([
@@ -236,65 +238,25 @@ check_routes(State) ->
             ]
     end.
 
-collect_route_handlers(#host_tree{hosts = Hosts}) ->
-    lists:flatmap(
-        fun({_Host, #routing_tree{tree = Tree}}) -> walk_tree(Tree, <<>>) end,
-        Hosts
-    ).
-
-walk_tree([], _Prefix) ->
-    [];
-walk_tree(
-    [#node{segment = Segment, is_binding = IsBinding, value = Value, children = Children} | Tl],
-    Prefix
-) ->
-    Seg = seg_bin(Segment, IsBinding),
-    NewPrefix = <<Prefix/binary, "/", Seg/binary>>,
-    [extract_handler(NC, NewPrefix) || NC <- Value] ++
-        walk_tree(Children, NewPrefix) ++
-        walk_tree(Tl, Prefix).
-
-seg_bin(S, true) when is_binary(S) -> <<"{", S/binary, "}">>;
-seg_bin(S, true) when is_list(S) -> <<"{", (list_to_binary(S))/binary, "}">>;
-seg_bin(S, _) when is_binary(S) -> S;
-seg_bin(S, _) when is_list(S) -> list_to_binary(S);
-seg_bin(S, _) when is_integer(S) -> integer_to_binary(S);
-seg_bin(_, _) -> <<"_">>.
+collect_route_handlers(Dispatch) ->
+    [extract_handler(Route) || Route <- rebar3_nova_dispatch:routes(Dispatch)].
 
 extract_handler(
-    #node_comp{
-        comparator = Method,
-        value = #nova_handler_value{
-            module = undefined,
-            function = undefined,
-            callback = Cb
-        }
-    },
-    Path
-) when
-    is_function(Cb)
-->
+    {Path, Method, #nova_handler_value{
+        module = undefined,
+        function = undefined,
+        callback = Cb
+    }}
+) when is_function(Cb) ->
     {module, M} = lists:keyfind(module, 1, erlang:fun_info(Cb)),
     {Path, Method, M, '$callback', captured};
-extract_handler(
-    #node_comp{
-        comparator = Method,
-        value = #nova_handler_value{module = Mod, function = Func}
-    },
-    Path
-) when
+extract_handler({Path, Method, #nova_handler_value{module = Mod, function = Func}}) when
     Mod =/= undefined
 ->
     {Path, Method, Mod, Func, 1};
-extract_handler(
-    #node_comp{
-        comparator = Method,
-        value = #cowboy_handler_value{handler = Handler}
-    },
-    Path
-) ->
+extract_handler({Path, Method, #cowboy_handler_value{handler = Handler}}) ->
     {Path, Method, Handler, init, 2};
-extract_handler(#node_comp{comparator = Method}, Path) ->
+extract_handler({Path, Method, _Payload}) ->
     {Path, Method, unknown, unknown, 1}.
 
 check_handler({_Path, _Method, unknown, _, _}) ->

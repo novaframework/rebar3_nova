@@ -2,8 +2,10 @@
 
 -export([init/1, do/1, format_error/1]).
 
+%% Exported for rebar3_nova_dispatch_SUITE.
+-export([collect_routes/1]).
+
 -include("nova_router.hrl").
--include_lib("routing_tree/include/routing_tree.hrl").
 
 -define(PROVIDER, audit).
 -define(DEPS, [{default, compile}]).
@@ -106,74 +108,30 @@ is_mutation(<<"delete">>) -> true;
 is_mutation(<<"patch">>) -> true;
 is_mutation(_) -> false.
 
-collect_routes(#host_tree{hosts = Hosts}) ->
-    lists:flatmap(
-        fun({_Host, #routing_tree{tree = Tree}}) ->
-            collect_nodes(Tree, <<>>)
-        end,
-        Hosts
-    ).
+collect_routes(Dispatch) ->
+    lists:flatmap(fun classify_route/1, rebar3_nova_dispatch:routes(Dispatch)).
 
-collect_nodes([], _Prefix) ->
+classify_route({_Path, _Method, #nova_handler_value{module = nova_file_controller}}) ->
     [];
-collect_nodes([#node{is_wildcard = true} | Tl], Prefix) ->
-    collect_nodes(Tl, Prefix);
-collect_nodes([#node{segment = Segment} | Tl], Prefix) when is_integer(Segment) ->
-    collect_nodes(Tl, Prefix);
-collect_nodes(
-    [#node{segment = Segment, is_binding = IsBinding, value = Value, children = Children} | Tl],
-    Prefix
-) ->
-    SegBin = segment_to_binary(Segment, IsBinding),
-    NewPrefix = <<Prefix/binary, "/", SegBin/binary>>,
-    HandlerRoutes = lists:filtermap(
-        fun(NodeComp) -> classify_handler(NodeComp, NewPrefix) end, Value
-    ),
-    lists:flatten(HandlerRoutes) ++ collect_nodes(Children, NewPrefix) ++ collect_nodes(Tl, Prefix).
-
-segment_to_binary(Segment, true) when is_binary(Segment) ->
-    <<"{", Segment/binary, "}">>;
-segment_to_binary(Segment, _) when is_binary(Segment) ->
-    Segment;
-segment_to_binary(Segment, IsBinding) when is_list(Segment) ->
-    segment_to_binary(erlang:list_to_binary(Segment), IsBinding).
-
-classify_handler(#node_comp{value = #nova_handler_value{module = nova_file_controller}}, _Path) ->
-    false;
-classify_handler(#node_comp{value = #nova_handler_value{module = nova_error_controller}}, _Path) ->
-    false;
-classify_handler(
-    #node_comp{
-        comparator = Method,
-        value = #nova_handler_value{
-            module = undefined,
-            function = undefined,
-            callback = Callback,
-            secure = Secure
-        }
-    },
-    Path
+classify_route({_Path, _Method, #nova_handler_value{module = nova_error_controller}}) ->
+    [];
+classify_route(
+    {Path, Method, #nova_handler_value{
+        module = undefined,
+        function = undefined,
+        callback = Callback,
+        secure = Secure
+    }}
 ) ->
     {module, Module} = lists:keyfind(module, 1, erlang:fun_info(Callback)),
-    expand_methods(Method, Path, Module, Secure);
-classify_handler(
-    #node_comp{
-        comparator = Method,
-        value = #nova_handler_value{module = Module, secure = Secure}
-    },
-    Path
-) ->
-    expand_methods(Method, Path, Module, Secure);
-classify_handler(#node_comp{value = #cowboy_handler_value{}}, _Path) ->
-    false.
+    expand_methods(Method, rebar3_nova_dispatch:openapi_path(Path), Module, Secure);
+classify_route({Path, Method, #nova_handler_value{module = Module, secure = Secure}}) ->
+    expand_methods(Method, rebar3_nova_dispatch:openapi_path(Path), Module, Secure);
+classify_route({_Path, _Method, #cowboy_handler_value{}}) ->
+    [].
 
 expand_methods('_', Path, Module, Secure) ->
     Methods = [<<"get">>, <<"post">>, <<"put">>, <<"delete">>, <<"patch">>],
-    {true, [{Path, M, Secure, Module, true} || M <- Methods]};
+    [{Path, M, Secure, Module, true} || M <- Methods];
 expand_methods(Method, Path, Module, Secure) ->
-    {true, [{Path, method_to_binary(Method), Secure, Module, false}]}.
-
-method_to_binary(Method) when is_atom(Method) ->
-    erlang:atom_to_binary(Method);
-method_to_binary(Method) when is_binary(Method) ->
-    string:lowercase(Method).
+    [{Path, rebar3_nova_dispatch:method_to_binary(Method), Secure, Module, false}].
