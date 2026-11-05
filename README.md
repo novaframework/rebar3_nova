@@ -1,6 +1,6 @@
-# Rebar3 plugin for Nova
+# rebar3_nova
 
-A rebar plugin for nova
+rebar3 plugin for the [Nova](https://github.com/novaframework/nova) web framework. Scaffolds new Erlang web apps, generates controllers, resources and tests, lists routes, serves with auto-reload and builds releases.
 
 ## Build
 
