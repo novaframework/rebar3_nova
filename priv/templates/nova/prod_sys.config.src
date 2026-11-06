@@ -15,7 +15,6 @@
          {cowboy_configuration, #{
                                   port => 8080
                                  }},
-         {dev_mode, false},
          {bootstrap_application, {{name}}}, %% Bootstraps the application
          %% Plugins is written on form {RequestType, Module, Options, Priority}
          %% Priority is that the lowest number is executed first

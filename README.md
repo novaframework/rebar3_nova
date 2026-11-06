@@ -8,21 +8,58 @@ rebar3 plugin for the [Nova](https://github.com/novaframework/nova) web framewor
 
 ## Installation
 
-Add the plugin to your rebar config (`~/.config/rebar3/rebar.config`):
+Add the plugin from Hex to your global rebar config (`~/.config/rebar3/rebar.config`):
+
+    {plugins, [
+        {rebar3_nova, "~> 0.13"}
+    ]}.
+
+Or run the installer, which adds the same line and keeps the rest of the file as it is:
+
+    $ bash -c "$(curl -fsSL https://raw.githubusercontent.com/novaframework/rebar3_nova/v0.14.0/install.sh)"
+
+This one-liner works once v0.14.0, the first release with this installer, is tagged; until then `curl -f` stops it with a 404, so add the plugin line above by hand.
+
+The installer comes from a release tag, as does the `install.escript` it runs (`REBAR3_NOVA_REF` picks another tag). If rebar3 is missing it offers to install rebar3 3.27.0, downloaded into a private temporary directory and run only when its sha256 matches the one GitHub publishes for that release.
+
+To track unreleased changes, use the git source instead:
 
     {plugins, [
         {rebar3_nova, {git, "https://github.com/novaframework/rebar3_nova.git", {branch, "master"}}}
     ]}.
-
-For latest stable from hex:
-
-    {plugins, [rebar3_nova]}.
 
 Then just call your plugin directly in an existing application:
 
     $ rebar3 nova
     ===> Fetching rebar3_nova
     ===> Compiling rebar3_nova
+
+## Creating a project
+
+    $ rebar3 new nova my_app            # Nova + ErlyDTL views
+    $ rebar3 new nova_fullstack my_app  # Nova + Arizona live views + Kura/PostgreSQL
+
+`rebar3 nova new` builds the same base project and adds parts with flags:
+
+    $ rebar3 nova new my_app --kura --arizona --docker
+
+| Flag | Adds |
+|------|------|
+| `--kura` | `kura` + `kura_postgres`, a repo module, the `{kura, compile}` migration hook, a `{kura, [{repos, ...}]}` config and a `docker-compose.yml` with PostgreSQL. Migrations are a release step, not run at boot (below). |
+| `--pgo` | `pgo` with a `{pgo, [{pools, ...}]}` config (not together with `--kura`) |
+| `--arizona` | `arizona_nova`, a live page at `/` with a layout, and the `arizona_nova` routes and middleware chain in the configs. Arizona needs OTP 29. |
+| `--otel` | OpenTelemetry deps and `opentelemetry_nova:setup()` at start |
+| `--lfe` | LFE sources instead of Erlang |
+| `--ci` | A GitHub Actions workflow |
+| `--docker` | A multi-stage `Dockerfile` (OTP 29 builder, Debian trixie runtime) |
+
+With `--kura`, and in `nova_fullstack`, the application does not migrate when it starts, so nodes that boot together do not race. Run the migrations once per deploy on the running node, `bin/my_app eval 'kura_migrator:migrate(my_app_repo).'`, or call `kura_migrator:migrate(my_app_repo)` in `rebar3 shell` during development; the generated repo module says the same.
+
+Releases keep distribution private by default: the node is named `my_app@localhost` and distribution is bound to `127.0.0.1`. A development release (`rebar3 release`) uses `config/dev_vm.args.src`, which takes the cookie from `~/.erlang.cookie`. A prod release (`rebar3 as prod release`, and the `--docker` image) uses `config/vm.args.src`, which takes it from the `RELEASE_COOKIE` environment variable, and requires it: a `pre_start` hook in the prod profile (`rel/hooks/require_cookie`, wired through `extended_start_script_hooks`) makes `bin/my_app start`, `daemon`, `foreground` and `console` exit with an error when it is unset or empty. Set it to the same secret on every node, e.g. `export RELEASE_COOKIE="$(openssl rand -hex 32)"` once, stored in your secret manager; `ping`, `stop`, `remote_console` and `rpc` read it too. For a cluster, also switch to `-name my_app@<host>` and drop the `inet_dist_use_interface` line. Keep `-setcookie ${RELEASE_COOKIE}` the last line of the file: an empty value there ends the arguments instead of taking the next one as the cookie. epmd, the port mapper, still listens on all interfaces (`0.0.0.0:4369`); set `ERL_EPMD_ADDRESS=127.0.0.1` in the environment before the first node on the host starts it to keep it on loopback too. The `--docker` image sets it.
+
+With `--kura` or `--pgo`, the prod config connects to PostgreSQL over TLS, verifying the server certificate against the OS trust store (for `--pgo`, `/etc/ssl/certs/ca-certificates.crt` and a `DATABASE_HOST` that is a host name); set `DATABASE_SSL=false` (`DB_SSL` in `nova_fullstack`) only for a database on the same host or a private network. The `--docker` image runs as an unprivileged `app` user that can write only `log` and the configs rendered into `releases/<vsn>` (the release itself stays owned by root), needs `RELEASE_COOKIE` at run time (`docker run -e RELEASE_COOKIE="$(openssl rand -hex 32)" -p 8080:8080 <image>`), its base images are pinned by digest, and a `.dockerignore` keeps `_build`, `.git` and `.env` out of the build context. The development `docker-compose.yml` publishes PostgreSQL on `127.0.0.1` only.
+
+Generated projects target OTP 29 and rebar3 3.27 (`.tool-versions`), depend on `{nova, "~> 0.18"}` and list `{rebar3_nova, "~> 0.13"}` as a project plugin.
 
 ## Commands
 

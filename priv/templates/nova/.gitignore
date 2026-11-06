@@ -1,5 +1,5 @@
 .rebar3
-_*
+_checkouts
 .eunit
 *.o
 *.beam
@@ -17,3 +17,4 @@ _build
 *.iml
 rebar3.crashdump
 *~
+.env

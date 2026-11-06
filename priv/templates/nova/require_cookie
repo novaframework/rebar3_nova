@@ -1,0 +1,8 @@
+# relx sources this before the node starts (a pre_start hook), so exit stops
+# bin/<release> start, daemon, foreground and console. Without RELEASE_COOKIE
+# the vm.args cookie is empty and the node cannot be reached or stopped.
+if [ -z "${RELEASE_COOKIE:-}" ]; then
+    echo "RELEASE_COOKIE is not set. Set it to the same long random secret on every node," >&2
+    echo "for example: export RELEASE_COOKIE=\"\$(openssl rand -hex 32)\"" >&2
+    exit 1
+fi
