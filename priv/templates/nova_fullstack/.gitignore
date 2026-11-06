@@ -17,4 +17,4 @@ erl_crash.dump
 rebar3.crashdump
 *~
 .DS_Store
-priv/static/assets/js/arizona*.js
+.env

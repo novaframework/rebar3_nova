@@ -1,0 +1,18 @@
+## Node name. Distribution listens on loopback only (below), so the node is
+## reached from this host as {{name}}@localhost. For a cluster, switch to
+## -name {{name}}@<host> and drop inet_dist_use_interface.
+-sname {{name}}@localhost
+
+-kernel inet_dist_use_interface {127,0,0,1}
+
+## epmd, which maps node names to ports, still listens on all interfaces
+## (0.0.0.0:4369). To keep it on loopback as well, set ERL_EPMD_ADDRESS=127.0.0.1
+## in the environment before the first node on the host starts epmd.
+
+## Enable kernel poll and SMP
++K true
++A30
+
+## The cookie comes from ~/.erlang.cookie, which Erlang creates on the first
+## start. Releases built with the prod profile use vm.args.src, which takes it
+## from RELEASE_COOKIE.

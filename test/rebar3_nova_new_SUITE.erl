@@ -17,7 +17,25 @@
     template_erlydtl_provider_hooks/1,
     combined_kura_arizona_ci/1,
     kura_pgo_mutually_exclusive/1,
-    existing_dir_aborts/1
+    existing_dir_aborts/1,
+    sys_configs_are_valid_terms/1,
+    dev_logger_uses_flatlog_handler/1,
+    no_unused_nova_keys/1,
+    current_toolchain/1,
+    generated_erlang_compiles/1,
+    templates_use_current_stack/1,
+    template_sys_configs_are_valid_terms/1,
+    vm_args_keep_the_cookie_out/1,
+    compose_binds_postgres_to_loopback/1,
+    dockerfile_runs_unprivileged/1,
+    erlydtl_plugin_is_pinned/1,
+    gitignore_ignores_env/1,
+    prod_database_uses_tls/1,
+    positional_project_name/1,
+    release_requires_the_cookie/1,
+    pgo_prod_pool_uses_tls/1,
+    migrations_are_a_release_step/1,
+    epmd_address_is_documented/1
 ]).
 
 all() ->
@@ -34,7 +52,25 @@ all() ->
         template_erlydtl_provider_hooks,
         combined_kura_arizona_ci,
         kura_pgo_mutually_exclusive,
-        existing_dir_aborts
+        existing_dir_aborts,
+        sys_configs_are_valid_terms,
+        dev_logger_uses_flatlog_handler,
+        no_unused_nova_keys,
+        current_toolchain,
+        generated_erlang_compiles,
+        templates_use_current_stack,
+        template_sys_configs_are_valid_terms,
+        vm_args_keep_the_cookie_out,
+        compose_binds_postgres_to_loopback,
+        dockerfile_runs_unprivileged,
+        erlydtl_plugin_is_pinned,
+        gitignore_ignores_env,
+        prod_database_uses_tls,
+        positional_project_name,
+        release_requires_the_cookie,
+        pgo_prod_pool_uses_tls,
+        migrations_are_a_release_step,
+        epmd_address_is_documented
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -100,18 +136,38 @@ kura_flag(_Config) ->
     assert_file_exists(Name, "src/testapp_kura_repo.erl"),
     assert_file_exists(Name, "docker-compose.yml"),
 
-    RebarConfig = read_file(Name, "rebar.config"),
-    assert_contains(RebarConfig, "kura"),
+    ?assert(filelib:is_dir(filename:join([Name, "src", "migrations"]))),
+
+    Terms = consult_rebar_config(Name),
+    Deps = prop(deps, Terms),
+    ?assertEqual({kura, "~> 2.25"}, lists:keyfind(kura, 1, Deps)),
+    ?assertEqual({kura_postgres, "~> 1.1"}, lists:keyfind(kura_postgres, 1, Deps)),
+    ?assertEqual(
+        {rebar3_kura, "~> 0.16"},
+        lists:keyfind(rebar3_kura, 1, prop(project_plugins, Terms))
+    ),
+    ?assertEqual(
+        [{pre, [{compile, {erlydtl, compile}}, {compile, {kura, compile}}]}],
+        prop(provider_hooks, Terms)
+    ),
+    Erlfmt = prop(erlfmt, Terms),
+    ?assert(lists:member("src/migrations/*.erl", prop(exclude_files, Erlfmt))),
 
     AppSrc = read_file(Name, "src/testapp_kura.app.src"),
-    assert_contains(AppSrc, "kura"),
+    assert_contains(AppSrc, "kura_postgres"),
 
     SupErl = read_file(Name, "src/testapp_kura_sup.erl"),
-    assert_contains(SupErl, "testapp_kura_repo"),
+    assert_contains(SupErl, "ChildSpecs = []"),
+
+    AppErl = read_file(Name, "src/testapp_kura_app.erl"),
+    assert_not_contains(AppErl, "kura_migrator"),
 
     DevConfig = read_file(Name, "config/dev_sys.config.src"),
-    assert_contains(DevConfig, "pgo"),
+    assert_not_contains(DevConfig, "pgo"),
     assert_contains(DevConfig, "testapp_kura_dev"),
+    {ok, [DevTerms]} = file:consult(filename:join([Name, "config", "dev_sys.config.src"])),
+    #{testapp_kura_repo := #{backend := kura_backend_postgres}} =
+        prop(repos, prop(kura, DevTerms)),
 
     RepoErl = read_file(Name, "src/testapp_kura_repo.erl"),
     assert_contains(RepoErl, "kura_repo"),
@@ -141,21 +197,45 @@ arizona_flag(_Config) ->
     Flags = (default_flags())#{arizona => true},
     rebar3_nova_new:generate_project(Name, Flags),
 
-    assert_file_exists(Name, "src/views/testapp_arizona_home_view.erl"),
+    assert_file_exists(Name, "src/live/testapp_arizona_home_live.erl"),
+    assert_file_exists(Name, "src/live/testapp_arizona_layout.erl"),
     assert_file_exists(Name, "priv/assets/app.css"),
     assert_file_not_exists(Name, "src/views/testapp_arizona_main.dtl"),
+    assert_file_not_exists(Name, "src/controllers/testapp_arizona_main_controller.erl"),
 
     RebarConfig = read_file(Name, "rebar.config"),
-    assert_contains(RebarConfig, "arizona_core"),
-    assert_contains(RebarConfig, "arizona_nova"),
+    assert_contains(RebarConfig, "{arizona_nova, \"~> 0.1\"}"),
+    assert_not_contains(RebarConfig, "arizona_core"),
     assert_not_contains(RebarConfig, "erlydtl"),
 
-    Router = read_file(Name, "src/testapp_arizona_router.erl"),
-    assert_contains(Router, "arizona_nova_adapter"),
-    assert_contains(Router, "ws"),
+    Live = read_file(Name, "src/live/testapp_arizona_home_live.erl"),
+    assert_contains(Live, "arizona/include/arizona_stateful.hrl"),
+    assert_not_contains(Live, "arizona_view"),
 
-    DevConfig = read_file(Name, "config/dev_sys.config.src"),
-    assert_contains(DevConfig, "arizona_core"),
+    Router = read_file(Name, "src/testapp_arizona_router.erl"),
+    assert_not_contains(Router, "arizona_nova_adapter"),
+    assert_not_contains(Router, "main_controller"),
+
+    [
+        assert_contains(
+            read_file(Name, "config/" ++ Env ++ "_sys.config.src"), "before nova_router"
+        )
+     || Env <- ["dev", "prod"]
+    ],
+    {ok, [DevTerms]} = file:consult(filename:join([Name, "config", "dev_sys.config.src"])),
+    ?assertEqual(undefined, prop(arizona_core, DevTerms)),
+    #{middleware_handlers := [arizona_cowboy_middleware, nova_router | _]} =
+        prop(cowboy_configuration, prop(nova, DevTerms)),
+    Routes = prop(routes, prop(arizona_nova, DevTerms)),
+    ?assertMatch(
+        {live, <<"/">>, testapp_arizona_home_live, #{layouts := [{testapp_arizona_layout, render}]}},
+        lists:keyfind(live, 1, Routes)
+    ),
+    ?assertMatch({ws, <<"/live/ws">>, _}, lists:keyfind(ws, 1, Routes)),
+    ?assertMatch(
+        {asset, <<"/assets/arizona">>, {priv_dir, arizona, "static/assets/js"}},
+        lists:keyfind(asset, 1, Routes)
+    ),
 
     ok.
 
@@ -202,7 +282,9 @@ docker_flag(_Config) ->
     assert_file_exists(Name, "Dockerfile"),
 
     Dockerfile = read_file(Name, "Dockerfile"),
-    assert_contains(Dockerfile, "erlang:28"),
+    assert_contains(Dockerfile, "FROM erlang:29@sha256:"),
+    assert_contains(Dockerfile, "FROM debian:trixie-slim@sha256:"),
+    assert_contains(Dockerfile, "ca-certificates"),
     assert_contains(Dockerfile, "testapp_docker"),
     assert_contains(Dockerfile, "EXPOSE 8080"),
 
@@ -221,7 +303,9 @@ otel_flag(_Config) ->
     assert_contains(AppSrc, "opentelemetry"),
 
     AppErl = read_file(Name, "src/testapp_otel_app.erl"),
-    assert_contains(AppErl, "opentelemetry:setup()"),
+    assert_contains(AppErl, "ok = opentelemetry_nova:setup()"),
+    assert_not_contains(AppErl, "opentelemetry:setup()"),
+    assert_contains(AppSrc, "opentelemetry_nova"),
 
     DevConfig = read_file(Name, "config/dev_sys.config.src"),
     assert_contains(DevConfig, "otel_exporter_stdout"),
@@ -237,10 +321,6 @@ erlydtl_provider_hooks(_Config) ->
     Base = "testapp_hooks_base",
     rebar3_nova_new:generate_project(Base, default_flags()),
     ?assert(lists:member(Hook, consult_rebar_config(Base))),
-
-    Kura = "testapp_hooks_kura",
-    rebar3_nova_new:generate_project(Kura, (default_flags())#{kura => true}),
-    ?assert(lists:member(Hook, consult_rebar_config(Kura))),
 
     Arizona = "testapp_hooks_arizona",
     rebar3_nova_new:generate_project(Arizona, (default_flags())#{arizona => true}),
@@ -263,10 +343,7 @@ erlydtl_provider_hooks(_Config) ->
     ok.
 
 template_erlydtl_provider_hooks(_Config) ->
-    PrivDir = code:priv_dir(rebar3_nova),
-    Template = filename:join([PrivDir, "templates", "nova", "rebar.config"]),
-    {ok, Bin} = file:read_file(Template),
-    Content = binary_to_list(Bin),
+    Content = read_file(templates_dir(), "nova/rebar.config"),
     assert_contains(Content, "{provider_hooks, ["),
     assert_contains(Content, "{pre, [{compile, {erlydtl, compile}}]}"),
     ok.
@@ -278,21 +355,22 @@ combined_kura_arizona_ci(_Config) ->
 
     assert_file_exists(Name, "src/testapp_combo_repo.erl"),
     assert_file_exists(Name, "docker-compose.yml"),
-    assert_file_exists(Name, "src/views/testapp_combo_home_view.erl"),
+    assert_file_exists(Name, "src/live/testapp_combo_home_live.erl"),
     assert_file_exists(Name, "priv/assets/app.css"),
     assert_file_exists(Name, ".github/workflows/ci.yml"),
     assert_file_not_exists(Name, "src/views/testapp_combo_main.dtl"),
 
     RebarConfig = read_file(Name, "rebar.config"),
-    assert_contains(RebarConfig, "kura"),
-    assert_contains(RebarConfig, "arizona_core"),
+    assert_contains(RebarConfig, "kura_postgres"),
+    assert_contains(RebarConfig, "arizona_nova"),
     assert_not_contains(RebarConfig, "erlydtl"),
+    ?assertEqual(
+        [{pre, [{compile, {kura, compile}}]}],
+        prop(provider_hooks, consult_rebar_config(Name))
+    ),
 
-    Router = read_file(Name, "src/testapp_combo_router.erl"),
-    assert_contains(Router, "arizona_nova_adapter"),
-
-    SupErl = read_file(Name, "src/testapp_combo_sup.erl"),
-    assert_contains(SupErl, "testapp_combo_repo"),
+    AppErl = read_file(Name, "src/testapp_combo_app.erl"),
+    assert_not_contains(AppErl, "kura_migrator"),
 
     ok.
 
@@ -311,9 +389,390 @@ existing_dir_aborts(_Config) ->
     ),
     ok.
 
+sys_configs_are_valid_terms(_Config) ->
+    Combos = [
+        #{},
+        #{kura => true},
+        #{pgo => true},
+        #{arizona => true},
+        #{lfe => true},
+        #{otel => true},
+        #{kura => true, arizona => true, otel => true},
+        #{lfe => true, arizona => true}
+    ],
+    [
+        assert_sys_configs_parse("testapp_cfg_" ++ integer_to_list(N), Extra)
+     || {N, Extra} <- lists:enumerate(Combos)
+    ],
+    ok.
+
+assert_sys_configs_parse(Name, Extra) ->
+    rebar3_nova_new:generate_project(Name, maps:merge(default_flags(), Extra)),
+    [
+        ?assertMatch({ok, [[_ | _]]}, consult_env_substituted(Name ++ "/config/" ++ File), File)
+     || File <- ["dev_sys.config.src", "prod_sys.config.src"]
+    ].
+
+dev_logger_uses_flatlog_handler(_Config) ->
+    Name = "testapp_logger",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    {ok, [Terms]} = file:consult(filename:join([Name, "config", "dev_sys.config.src"])),
+    Kernel = prop(kernel, Terms),
+    ?assert(lists:all(fun is_tuple/1, Kernel)),
+    ?assertMatch(
+        [{handler, default, logger_std_h, #{formatter := {flatlog, _}}}],
+        prop(logger, Kernel)
+    ).
+
+no_unused_nova_keys(_Config) ->
+    Name = "testapp_nova_keys",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    [
+        assert_not_contains(read_file(Name, "config/" ++ File), "dev_mode")
+     || File <- ["dev_sys.config.src", "prod_sys.config.src"]
+    ].
+
+current_toolchain(_Config) ->
+    Name = "testapp_toolchain",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    ?assertEqual("erlang 29.1.2\nrebar 3.27.0\n", read_file(Name, ".tool-versions")),
+    GitIgnore = string:split(read_file(Name, ".gitignore"), "\n", all),
+    ?assertNot(lists:member("_*", GitIgnore)),
+    ?assert(lists:member("_build", GitIgnore)),
+    Terms = consult_rebar_config(Name),
+    ?assertEqual({nova, "~> 0.18"}, lists:keyfind(nova, 1, prop(deps, Terms))),
+    ?assertEqual(
+        {rebar3_nova, "~> 0.13"},
+        lists:keyfind(rebar3_nova, 1, prop(project_plugins, Terms))
+    ),
+    TestProfile = prop(test, prop(profiles, Terms)),
+    ?assertEqual([{meck, "1.2.0"}], prop(deps, TestProfile)).
+
+generated_erlang_compiles(_Config) ->
+    Name = "testapp_compiles",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{kura => true, otel => true}),
+    Files = filelib:wildcard(Name ++ "/src/**/*.erl"),
+    ?assertNotEqual([], Files),
+    [?assertMatch({ok, _, _}, compile:file(File, [binary, return_errors]), File) || File <- Files].
+
+templates_use_current_stack(_Config) ->
+    Dir = templates_dir(),
+    Files = filelib:wildcard("nova*/*", Dir) ++ filelib:wildcard("nova*/.*", Dir),
+    [
+        ?assertEqual(nomatch, string:find(read_file(Dir, File), Stale), {File, Stale})
+     || File <- Files,
+        Stale <- [
+            "arizona_view",
+            "arizona_core",
+            "Taure/arizona_nova",
+            "{meck, \"1.1.0\"}",
+            "rebar3_nova.git"
+        ]
+    ],
+    [
+        ?assertEqual(nomatch, string:find(read_file(Dir, File), "dev_mode"), File)
+     || File <- template_sys_configs()
+    ],
+    {ok, Fullstack} = file:consult(Dir ++ "/nova_fullstack/rebar.config"),
+    Deps = prop(deps, Fullstack),
+    ?assertEqual({kura, "~> 2.25"}, lists:keyfind(kura, 1, Deps)),
+    ?assertEqual({kura_postgres, "~> 1.1"}, lists:keyfind(kura_postgres, 1, Deps)),
+    ?assertEqual({arizona_nova, "~> 0.1"}, lists:keyfind(arizona_nova, 1, Deps)),
+    GitIgnore = string:split(read_file(Dir, "nova/.gitignore"), "\n", all),
+    ?assertNot(lists:member("_*", GitIgnore)).
+
+template_sys_configs_are_valid_terms(_Config) ->
+    [
+        ?assert(lists:all(fun is_tuple/1, prop(kernel, render_template_config(File))), File)
+     || File <- template_sys_configs()
+    ],
+    [
+        assert_contains(read_file(templates_dir(), "nova_fullstack/" ++ File), "before nova_router")
+     || File <- ["dev_sys.config.src", "prod_sys.config.src"]
+    ],
+    Terms = render_template_config("nova_fullstack/dev_sys.config.src"),
+    #{app_repo := #{backend := kura_backend_postgres}} =
+        prop(repos, prop(kura, Terms)),
+    ?assertMatch(
+        [{live, <<"/">>, app_home_live, #{layouts := [{app_layout, render}]}} | _],
+        prop(routes, prop(arizona_nova, Terms))
+    ).
+
+%% A cookie written into vm.args is the same for every project of that name,
+%% so anyone who can reach the distribution port can run code on the node.
+vm_args_keep_the_cookie_out(_Config) ->
+    Name = "testapp_vmargs",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    Generated = read_file(Name, "config/vm.args.src"),
+    assert_contains(Generated, "-sname testapp_vmargs@localhost"),
+    [assert_vm_args(V) || V <- [Generated, read_file(templates_dir(), "nova/vm.args.src")]],
+    assert_contains(
+        read_file(templates_dir(), "nova_lfe.template"),
+        "{template, \"nova/vm.args.src\", \"{{name}}/config/vm.args.src\"}"
+    ),
+    assert_contains(
+        read_file(templates_dir(), "nova_lfe/rebar.config"),
+        "{vm_args_src, \"./config/vm.args.src\"}"
+    ).
+
+%% The development database's postgres/postgres login must not be reachable
+%% from the network.
+compose_binds_postgres_to_loopback(_Config) ->
+    Name = "testapp_compose",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{kura => true}),
+    [
+        begin
+            assert_contains(Compose, "\"127.0.0.1:5432:5432\""),
+            assert_not_contains(Compose, "- \"5432:5432\"")
+        end
+     || Compose <- [
+            read_file(Name, "docker-compose.yml"),
+            read_file(templates_dir(), "nova_fullstack/docker-compose.yml")
+        ]
+    ].
+
+dockerfile_runs_unprivileged(_Config) ->
+    Name = "testapp_dockeruser",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{docker => true}),
+    Dockerfile = read_file(Name, "Dockerfile"),
+    [_Builder, Runtime] = string:split(Dockerfile, "\nFROM ", trailing),
+    assert_contains(Runtime, "useradd --system --uid 10001"),
+    %% The release stays owned by root, so the app cannot rewrite its own code;
+    %% it writes only the rendered configs in releases/<vsn> and its logs.
+    assert_contains(Runtime, "COPY --from=builder /app/_build/prod/rel/testapp_dockeruser ./\n"),
+    assert_not_contains(Runtime, "--chown"),
+    assert_not_contains(Runtime, "chown app:app /app"),
+    assert_contains(Runtime, "RUN mkdir log && chown app:app log releases/*/\n"),
+    assert_contains(Runtime, "\nUSER app\n"),
+    assert_contains(Runtime, "-e RELEASE_COOKIE="),
+    ?assertMatch(
+        {match, _},
+        re:run(Dockerfile, "^FROM erlang:29@sha256:[0-9a-f]{64} AS builder$", [multiline])
+    ),
+    ?assertMatch({match, _}, re:run(Runtime, "^debian:trixie-slim@sha256:[0-9a-f]{64}\n")),
+    Ignored = string:split(read_file(Name, ".dockerignore"), "\n", all),
+    [?assert(lists:member(Entry, Ignored), Entry) || Entry <- ["_build", ".git", ".env"]].
+
+erlydtl_plugin_is_pinned(_Config) ->
+    Name = "testapp_erlydtl_pin",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    {ok, Template} = file:consult(filename:join(templates_dir(), "nova/rebar.config")),
+    {ok, Lfe} = file:consult(filename:join(templates_dir(), "nova_lfe/rebar.config")),
+    [
+        ?assertMatch(
+            {rebar3_erlydtl_plugin, _,
+                {git, "https://github.com/erlydtl/rebar3_erlydtl_plugin.git", {ref, [_ | _]}}},
+            lists:keyfind(rebar3_erlydtl_plugin, 1, Plugins)
+        )
+     || Plugins <- [
+            prop(project_plugins, consult_rebar_config(Name)),
+            prop(project_plugins, Template),
+            prop(plugins, Lfe)
+        ]
+    ].
+
+gitignore_ignores_env(_Config) ->
+    Name = "testapp_gitignore",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    [
+        ?assert(lists:member(".env", string:split(GitIgnore, "\n", all)))
+     || GitIgnore <- [
+            read_file(Name, ".gitignore"),
+            read_file(templates_dir(), "nova/.gitignore"),
+            read_file(templates_dir(), "nova_fullstack/.gitignore")
+        ]
+    ].
+
+%% kura_postgres hands ssl to minato, which then verifies the server
+%% certificate against the OS trust store.
+prod_database_uses_tls(_Config) ->
+    Name = "testapp_dbtls",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{kura => true}),
+    {ok, [Generated]} = consult_env_substituted(
+        Name ++ "/config/prod_sys.config.src"
+    ),
+    Fullstack = render_template_config("nova_fullstack/prod_sys.config.src"),
+    [
+        begin
+            Kura = prop(kura, Terms),
+            ?assertEqual(true, prop(ssl, Kura)),
+            [Repo] = maps:values(prop(repos, Kura)),
+            ?assertMatch(#{ssl := true}, Repo)
+        end
+     || Terms <- [Generated, Fullstack]
+    ].
+
+%% rebar3 hands a namespaced provider its first positional argument as the
+%% task option, so `rebar3 nova new my_app` used to crash.
+positional_project_name(_Config) ->
+    ?assertEqual("my_app", rebar3_nova_new:resolve_name([{task, "my_app"}, {kura, true}], [])),
+    ?assertEqual("named", rebar3_nova_new:resolve_name([{name, "named"}, {task, "my_app"}], [])),
+    ?assertEqual("rest", rebar3_nova_new:resolve_name([], ["rest"])),
+    ?assertError(missing_project_name, rebar3_nova_new:resolve_name([{kura, true}], [])).
+
+%% With RELEASE_COOKIE unset the node starts with an empty cookie and then
+%% bin/<app> ping, stop and remote_console cannot reach it, and daemon waits
+%% for it forever. The pre_start hook refuses to start it instead.
+%% Only prod releases need RELEASE_COOKIE; a development release takes the
+%% cookie from ~/.erlang.cookie.
+release_requires_the_cookie(_Config) ->
+    Name = "testapp_cookiehook",
+    rebar3_nova_new:generate_project(Name, default_flags()),
+    Hook = filename:join(Name, "rel/hooks/require_cookie"),
+    assert_cookie_hook_in_prod_only(consult_rebar_config(Name)),
+    DevVmArgs = read_file(Name, "config/dev_vm.args.src"),
+    assert_not_contains(DevVmArgs, "-setcookie"),
+    assert_contains(DevVmArgs, "-sname testapp_cookiehook@localhost"),
+    [
+        begin
+            Contents = read_file(templates_dir(), Template),
+            assert_contains(
+                Contents,
+                "{file, \"nova/require_cookie\", \"{{name}}/rel/hooks/require_cookie\"}"
+            ),
+            assert_contains(
+                Contents,
+                "{template, \"nova/dev_vm.args.src\", \"{{name}}/config/dev_vm.args.src\"}"
+            ),
+            assert_cookie_hook_in_prod_only(render_template_rebar_config(Config))
+        end
+     || {Template, Config} <- [
+            {"nova.template", "nova/rebar.config"},
+            {"nova_lfe.template", "nova_lfe/rebar.config"},
+            {"nova_fullstack.template", "nova_fullstack/rebar.config"}
+        ]
+    ],
+    assert_contains(read_file(Name, "config/vm.args.src"), "RELEASE_COOKIE is required"),
+    {1, Refused} = source_hook(Hook, [{"RELEASE_COOKIE", false}]),
+    assert_contains(Refused, "RELEASE_COOKIE is not set"),
+    ?assertMatch({1, _}, source_hook(Hook, [{"RELEASE_COOKIE", ""}])),
+    ?assertEqual({0, ""}, source_hook(Hook, [{"RELEASE_COOKIE", "s3cret"}])).
+
+%% Nodes that boot together would race on migrate-at-start.
+migrations_are_a_release_step(_Config) ->
+    Name = "testapp_migrations",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{kura => true}),
+    assert_not_contains(read_file(Name, "src/testapp_migrations_app.erl"), "kura_migrator"),
+    assert_contains(
+        read_file(Name, "src/testapp_migrations_repo.erl"),
+        "bin/testapp_migrations eval 'kura_migrator:migrate(testapp_migrations_repo).'"
+    ),
+    assert_not_contains(read_file(templates_dir(), "nova_fullstack/app.erl"), "kura_migrator"),
+    assert_contains(
+        read_file(templates_dir(), "nova_fullstack/repo.erl"),
+        "bin/{{name}} eval 'kura_migrator:migrate({{name}}_repo).'"
+    ).
+
+%% Distribution is on loopback, but epmd is not unless told so.
+epmd_address_is_documented(_Config) ->
+    Name = "testapp_epmd",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{docker => true}),
+    [
+        assert_contains(read_file(Name, VmArgs), "ERL_EPMD_ADDRESS=127.0.0.1")
+     || VmArgs <- ["config/vm.args.src", "config/dev_vm.args.src"]
+    ],
+    assert_contains(read_file(Name, "Dockerfile"), "\nENV ERL_EPMD_ADDRESS=127.0.0.1\n").
+
+%% pgo hands ssl_options straight to ssl:connect/2, which since OTP 26
+%% refuses verify_peer without a trust store and checks the host name only
+%% against server_name_indication on an upgraded socket.
+pgo_prod_pool_uses_tls(_Config) ->
+    Name = "testapp_pgotls",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{pgo => true}),
+    {ok, [Terms]} = consult_env_substituted(Name ++ "/config/prod_sys.config.src"),
+    [{default, Pool}] = prop(pools, prop(pgo, Terms)),
+    ?assertMatch(#{ssl := true, ssl_options := _}, Pool),
+    SslOptions = maps:get(ssl_options, Pool),
+    ?assertEqual(verify_peer, prop(verify, SslOptions)),
+    ?assertEqual("/etc/ssl/certs/ca-certificates.crt", prop(cacertfile, SslOptions)),
+    ?assert(lists:keymember(server_name_indication, 1, SslOptions)),
+    Source = read_file(Name, "config/prod_sys.config.src"),
+    assert_contains(Source, "ssl => ${DATABASE_SSL:-true}"),
+    assert_contains(Source, "{server_name_indication, \"${DATABASE_HOST}\"}").
+
+assert_cookie_hook_in_prod_only(RebarConfig) ->
+    Dev = prop(relx, RebarConfig),
+    Prod = prop(relx, prop(prod, prop(profiles, RebarConfig))),
+    ?assertEqual(undefined, prop(extended_start_script_hooks, Dev)),
+    ?assertEqual(undefined, prop(overlay, Dev)),
+    ?assertEqual("./config/dev_vm.args.src", prop(vm_args_src, Dev)),
+    ?assertEqual("./config/vm.args.src", prop(vm_args_src, Prod)),
+    assert_cookie_hook(Prod).
+
+assert_cookie_hook(Relx) ->
+    ?assertEqual(
+        [{pre_start, [{custom, "hooks/require_cookie"}]}],
+        prop(extended_start_script_hooks, Relx)
+    ),
+    ?assert(
+        lists:member(
+            {copy, "rel/hooks/require_cookie", "bin/hooks/require_cookie"}, prop(overlay, Relx)
+        )
+    ).
+
+-spec render_template_rebar_config(string()) -> dynamic().
+render_template_rebar_config(File) ->
+    {ok, Bin} = file:read_file(templates_dir() ++ "/" ++ File),
+    Rendered = binary:replace(Bin, ~"{{name}}", ~"app", [global]),
+    ok = file:write_file("rendered_rebar.config", Rendered),
+    {ok, Terms} = file:consult("rendered_rebar.config"),
+    Terms.
+
+%% relx sources the hook from bin/<app>, so run it the same way.
+source_hook(Hook, Env) ->
+    Port = open_port(
+        {spawn_executable, "/bin/sh"},
+        [{args, ["-c", ". \"$0\"", Hook]}, {env, Env}, exit_status, stderr_to_stdout]
+    ),
+    collect_port(Port, []).
+
+collect_port(Port, Acc) ->
+    receive
+        {Port, {data, Data}} -> collect_port(Port, [Acc, Data]);
+        {Port, {exit_status, Status}} -> {Status, lists:flatten(Acc)}
+    after 10000 -> error(hook_timeout)
+    end.
+
+template_sys_configs() ->
+    [
+        "nova/dev_sys.config.src",
+        "nova/prod_sys.config.src",
+        "nova_lfe/dev_sys.config.src",
+        "nova_fullstack/dev_sys.config.src",
+        "nova_fullstack/prod_sys.config.src"
+    ].
+
+-spec render_template_config(string()) -> dynamic().
+render_template_config(File) ->
+    {ok, Bin} = file:read_file(templates_dir() ++ "/" ++ File),
+    {ok, [Terms]} = consult_string(binary:replace(Bin, ~"{{name}}", ~"app", [global])),
+    Terms.
+
 %%======================================================================
 %% Helpers
 %%======================================================================
+
+-spec prop(atom(), dynamic()) -> dynamic().
+prop(Key, Terms) ->
+    proplists:get_value(Key, Terms).
+
+templates_dir() ->
+    case code:priv_dir(rebar3_nova) of
+        Dir when is_list(Dir) -> Dir ++ "/templates"
+    end.
+
+%% relx substitutes ${VAR} and ${VAR:-Default} before parsing a .src config.
+-spec consult_env_substituted(string()) -> {ok, dynamic()} | {error, term()}.
+consult_env_substituted(Path) ->
+    {ok, Bin} = file:read_file(Path),
+    consult_string(Bin).
+
+-spec consult_string(binary()) -> {ok, dynamic()} | {error, term()}.
+consult_string(Bin) ->
+    Substituted = re:replace(Bin, "\\$\\{[A-Z_]+(:-([^}]*))?\\}", "\\2", [global, {return, binary}]),
+    Path = "substituted.config",
+    ok = file:write_file(Path, Substituted),
+    file:consult(Path).
 
 default_flags() ->
     #{
@@ -334,14 +793,22 @@ assert_file_not_exists(Base, RelPath) ->
     Path = filename:join(Base, RelPath),
     ?assertNot(filelib:is_regular(Path), #{msg => "Expected file to not exist", path => Path}).
 
+-spec consult_rebar_config(string()) -> dynamic().
 consult_rebar_config(Base) ->
     {ok, Terms} = file:consult(filename:join(Base, "rebar.config")),
     Terms.
 
+-spec read_file(string(), string()) -> string().
 read_file(Base, RelPath) ->
     Path = filename:join(Base, RelPath),
     {ok, Bin} = file:read_file(Path),
     binary_to_list(Bin).
+
+assert_vm_args(VmArgs) ->
+    Lines = [L || L <- string:split(VmArgs, "\n", all), string:trim(L) =/= ""],
+    ?assertEqual(["-setcookie ${RELEASE_COOKIE}"], [L || "-setcookie" ++ _ = L <- Lines]),
+    ?assertEqual("-setcookie ${RELEASE_COOKIE}", lists:last(Lines)),
+    ?assert(lists:member("-kernel inet_dist_use_interface {127,0,0,1}", Lines)).
 
 assert_contains(Content, Substr) ->
     case string:find(Content, Substr) of

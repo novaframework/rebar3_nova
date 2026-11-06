@@ -1,9 +1,21 @@
-## Name of the node
--sname {{name}}
+## Node name. Distribution listens on loopback only (below), so the node is
+## reached from this host as {{name}}@localhost. For a cluster, switch to
+## -name {{name}}@<host> and drop inet_dist_use_interface.
+-sname {{name}}@localhost
 
-## Cookie for distributed erlang
--setcookie {{name}}_cookie
+-kernel inet_dist_use_interface {127,0,0,1}
+
+## epmd, which maps node names to ports, still listens on all interfaces
+## (0.0.0.0:4369). To keep it on loopback as well, set ERL_EPMD_ADDRESS=127.0.0.1
+## in the environment before the first node on the host starts epmd.
 
 ## Enable kernel poll and SMP
 +K true
 +A30
+
+## Prod releases (rebar3 as prod release) use this file; development releases
+## use dev_vm.args.src. RELEASE_COOKIE is required: it is the distribution
+## cookie, the same secret on every node of a cluster, and bin/{{name}} refuses
+## to start the node without it (rel/hooks/require_cookie). Keep this line
+## last, so an empty value can never take the next argument as the cookie.
+-setcookie ${RELEASE_COOKIE}

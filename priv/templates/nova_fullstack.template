@@ -1,4 +1,4 @@
-{description, "Full-stack Nova project with Arizona LiveView and Kura database"}.
+{description, "Full-stack Nova project with Arizona live views and Kura database"}.
 {variables, [
     {name, "project", "Name of the project"}
 ]}.
@@ -8,23 +8,25 @@
 {dir, "{{name}}/priv/static"}.
 {dir, "{{name}}/priv/static/assets"}.
 {dir, "{{name}}/priv/static/assets/css"}.
-{dir, "{{name}}/priv/static/assets/js"}.
-{dir, "{{name}}/priv/migrations"}.
 {dir, "{{name}}/config"}.
 {dir, "{{name}}/src/controllers"}.
-{dir, "{{name}}/src/views"}.
+{dir, "{{name}}/src/live"}.
+{dir, "{{name}}/src/migrations"}.
 {dir, "{{name}}/src/schemas"}.
 
 {template, "nova_fullstack/rebar.config", "{{name}}/rebar.config"}.
 {template, "nova_fullstack/app.src", "{{name}}/src/{{name}}.app.src"}.
-{template, "nova/app.erl", "{{name}}/src/{{name}}_app.erl"}.
+{template, "nova_fullstack/app.erl", "{{name}}/src/{{name}}_app.erl"}.
 {template, "nova/sup.erl", "{{name}}/src/{{name}}_sup.erl"}.
 {template, "nova_fullstack/router.erl", "{{name}}/src/{{name}}_router.erl"}.
-{template, "nova_fullstack/home_view.erl", "{{name}}/src/views/{{name}}_home_view.erl"}.
+{template, "nova_fullstack/home_live.erl", "{{name}}/src/live/{{name}}_home_live.erl"}.
+{template, "nova_fullstack/layout.erl", "{{name}}/src/live/{{name}}_layout.erl"}.
 {template, "nova_fullstack/repo.erl", "{{name}}/src/{{name}}_repo.erl"}.
 {template, "nova_fullstack/dev_sys.config.src", "{{name}}/config/dev_sys.config.src"}.
 {template, "nova_fullstack/prod_sys.config.src", "{{name}}/config/prod_sys.config.src"}.
 {template, "nova/vm.args.src", "{{name}}/config/vm.args.src"}.
+{template, "nova/dev_vm.args.src", "{{name}}/config/dev_vm.args.src"}.
+{file, "nova/require_cookie", "{{name}}/rel/hooks/require_cookie"}.
 {template, "nova_fullstack/docker-compose.yml", "{{name}}/docker-compose.yml"}.
 
 {file, "nova_fullstack/Makefile", "{{name}}/Makefile"}.
