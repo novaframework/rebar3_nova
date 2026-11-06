@@ -6,7 +6,6 @@
         kernel,
         stdlib,
         nova,
-        routing_tree,
         fs
     ]},
     {env, []},

@@ -2,8 +2,17 @@
 
 -export([init/1, do/1, format_error/1]).
 
+%% Exported for rebar3_nova_dispatch_SUITE.
+-export([
+    collect_routes/1, collect_routes/2,
+    build_spec/4,
+    component_schema/1,
+    component_names/1,
+    load_schemas/1,
+    default_output/1
+]).
+
 -include("nova_router.hrl").
--include_lib("routing_tree/include/routing_tree.hrl").
 
 -define(PROVIDER, openapi).
 -define(DEPS, [{default, compile}]).
@@ -19,14 +28,19 @@ init(State) ->
         {namespace, nova},
         {bare, true},
         {deps, ?DEPS},
-        {example, "rebar3 nova openapi"},
+        {example, "rebar3 nova openapi --prefix /api"},
         {opts, [
-            {output, $o, "output", string, "Output file path (default: priv/assets/openapi.json)"},
+            {output, $o, "output", string,
+                "Output file path (default: priv/assets/openapi.json, served under /assets)"},
             {title, $t, "title", string, "API title (default: app name)"},
-            {api_version, $v, "api-version", {string, "0.1.0"}, "API version"}
+            {api_version, $v, "api-version", {string, "0.1.0"}, "API version"},
+            {prefix, $p, "prefix", string,
+                "Only document paths under this prefix, e.g. /api (default: every controller route)"}
         ]},
         {short_desc, "Generate OpenAPI 3.0.3 spec from routes"},
-        {desc, "Generates an OpenAPI 3.0.3 JSON specification from compiled Nova routes"}
+        {desc,
+            "Generates an OpenAPI 3.0.3 JSON specification from the compiled Nova routes. "
+            "Static files, error pages and inline funs are left out."}
     ]),
     {ok, rebar_state:add_provider(State, Provider)}.
 
@@ -39,7 +53,7 @@ do(State) ->
     {Args, _} = rebar_state:command_parsed_args(State),
     Output =
         case proplists:get_value(output, Args) of
-            undefined -> filename:join([AppDir, "priv", "assets", "openapi.json"]);
+            undefined -> default_output(AppDir);
             O -> O
         end,
     Title =
@@ -48,281 +62,248 @@ do(State) ->
             T -> T
         end,
     ApiVersion = proplists:get_value(api_version, Args, "0.1.0"),
+    Prefix = proplists:get_value(prefix, Args, ""),
 
-    Dispatch = nova_router:compile([AppName]),
-    Routes = collect_routes(Dispatch),
+    Dispatch = rebar3_nova_utils:compile_routes(State, AppName),
+    ok = rebar3_nova_dispatch:warn_unknown(Dispatch),
+    Routes = collect_routes(Dispatch, unicode:characters_to_binary(Prefix)),
 
     Schemas = load_schemas(AppDir),
 
     Spec = build_spec(Title, ApiVersion, Routes, Schemas),
-    Json = thoas:encode(Spec),
 
     ok = filelib:ensure_dir(Output),
-    ok = file:write_file(Output, Json),
+    ok = file:write_file(Output, [json:format(Spec), $\n]),
     rebar_api:info("OpenAPI spec written to ~s", [Output]),
-
-    SwaggerPath = filename:join(filename:dirname(Output), "swagger.html"),
-    ok = file:write_file(SwaggerPath, swagger_html(Output)),
-    rebar_api:info("Swagger UI written to ~s", [SwaggerPath]),
     {ok, State}.
 
 -spec format_error(any()) -> iolist().
 format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
+-doc """
+Where the spec goes without `--output`: `priv/assets`, which the scaffold
+serves under `/assets`. Pass `--output` to keep it private.
+""".
+-spec default_output(file:filename_all()) -> file:filename_all().
+default_output(AppDir) ->
+    filename:join([AppDir, "priv", "assets", "openapi.json"]).
+
 %% ===================================================================
 %% Route collection
 %% ===================================================================
-collect_routes(#host_tree{hosts = Hosts}) ->
-    lists:flatmap(
-        fun({_Host, #routing_tree{tree = Tree}}) ->
-            collect_nodes(Tree, <<>>)
-        end,
-        Hosts
-    ).
+collect_routes(Dispatch) ->
+    collect_routes(Dispatch, ~"").
 
-collect_nodes([], _Prefix) ->
-    [];
-collect_nodes([#node{is_wildcard = true} | Tl], Prefix) ->
-    collect_nodes(Tl, Prefix);
-collect_nodes([#node{segment = Segment} | Tl], Prefix) when is_integer(Segment) ->
-    collect_nodes(Tl, Prefix);
-collect_nodes(
-    [#node{segment = Segment, is_binding = IsBinding, value = Value, children = Children} | Tl],
-    Prefix
-) ->
-    SegBin = segment_to_binary(Segment, IsBinding),
-    NewPrefix = <<Prefix/binary, "/", SegBin/binary>>,
-    HandlerRoutes = lists:filtermap(
-        fun(NodeComp) -> classify_handler(NodeComp, NewPrefix) end, Value
-    ),
-    HandlerRoutes ++ collect_nodes(Children, NewPrefix) ++ collect_nodes(Tl, Prefix).
+collect_routes(Dispatch, Prefix) ->
+    [
+        Route
+     || Route = {Path, _M, _Mod, _F, _E} <- lists:flatmap(
+            fun classify_route/1, rebar3_nova_dispatch:routes(Dispatch)
+        ),
+        under_prefix(Path, Prefix)
+    ].
 
-segment_to_binary(Segment, true) when is_binary(Segment) ->
-    <<"{", Segment/binary, "}">>;
-segment_to_binary(Segment, _) when is_binary(Segment) ->
-    Segment;
-segment_to_binary(Segment, IsBinding) when is_list(Segment) ->
-    segment_to_binary(erlang:list_to_binary(Segment), IsBinding).
+under_prefix(_Path, ~"") ->
+    true;
+under_prefix(Path, Prefix) ->
+    Trimmed = string:trim(Prefix, trailing, "/"),
+    Path =:= Trimmed orelse string:prefix(Path, <<Trimmed/binary, "/">>) =/= nomatch.
 
-%% ===================================================================
-%% Handler classification
-%% ===================================================================
-classify_handler(#node_comp{value = #nova_handler_value{module = nova_file_controller}}, _Path) ->
-    false;
-classify_handler(#node_comp{value = #nova_handler_value{module = nova_error_controller}}, _Path) ->
-    false;
-classify_handler(
-    #node_comp{
-        comparator = Method,
-        value = #nova_handler_value{
-            module = undefined,
-            function = undefined,
-            callback = Callback,
-            extra_state = Extra
-        }
-    },
-    Path
-) ->
-    {module, Module} = lists:keyfind(module, 1, erlang:fun_info(Callback)),
-    {name, Function} = lists:keyfind(name, 1, erlang:fun_info(Callback)),
-    expand_methods(Method, Path, Module, Function, Extra);
-classify_handler(
-    #node_comp{
-        comparator = Method,
-        value = #nova_handler_value{
-            module = Module,
-            function = Function,
-            extra_state = Extra
-        }
-    },
-    Path
-) ->
-    expand_methods(Method, Path, Module, Function, Extra);
-classify_handler(#node_comp{value = #cowboy_handler_value{}}, _Path) ->
-    false.
+classify_route({Path, Method, #nova_handler_value{extra_state = Extra} = Value}) ->
+    case rebar3_nova_dispatch:handler(Value) of
+        {controller, Module, Function} ->
+            expand_methods(
+                Method, rebar3_nova_dispatch:openapi_path(Path), Module, Function, Extra
+            );
+        _StaticErrorPageOrInlineFun ->
+            []
+    end;
+classify_route({_Path, _Method, _CowboyHandler}) ->
+    [].
 
 expand_methods('_', Path, Module, Function, Extra) ->
-    Methods = [<<"get">>, <<"post">>, <<"put">>, <<"delete">>, <<"patch">>],
-    {true, [{Path, M, Module, Function, Extra} || M <- Methods]};
+    Methods = [~"get", ~"post", ~"put", ~"delete", ~"patch"],
+    [{Path, M, Module, Function, Extra} || M <- Methods];
 expand_methods(Method, Path, Module, Function, Extra) ->
-    {true, [{Path, method_to_binary(Method), Module, Function, Extra}]}.
-
-method_to_binary(Method) when is_atom(Method) ->
-    erlang:atom_to_binary(Method);
-method_to_binary(Method) when is_binary(Method) ->
-    string:lowercase(Method).
+    [{Path, rebar3_nova_dispatch:method_to_binary(Method), Module, Function, Extra}].
 
 %% ===================================================================
 %% Schema loading
 %% ===================================================================
 load_schemas(AppDir) ->
     SchemaDir = filename:join([AppDir, "priv", "schemas"]),
-    SchemaDirStr = unicode:characters_to_list(SchemaDir),
-    case filelib:is_dir(SchemaDirStr) of
-        false ->
-            #{};
-        true ->
-            Files = filelib:wildcard("*.json", SchemaDirStr),
-            maps:from_list(
-                lists:filtermap(
-                    fun(File) ->
-                        FullPath = filename:join(SchemaDir, File),
-                        case file:read_file(FullPath) of
-                            {ok, Bin} ->
-                                case thoas:decode(Bin) of
-                                    {ok, Decoded} ->
-                                        Name = erlang:list_to_binary(
-                                            filename:basename(File, ".json")
-                                        ),
-                                        {true, {Name, Decoded}};
-                                    {error, _} ->
-                                        rebar_api:warn("Failed to parse schema: ~s", [File]),
-                                        false
-                                end;
-                            {error, _} ->
-                                false
-                        end
-                    end,
-                    Files
-                )
-            )
+    Files = filelib:wildcard("**/*.json", unicode:characters_to_list(SchemaDir)),
+    case component_names(Files) of
+        {ok, Named} ->
+            maps:from_list([
+                {Name, Schema}
+             || {Name, File} <- Named, {ok, Schema} <- [load_schema(SchemaDir, File)]
+            ]);
+        {error, {collision, Name, Paths}} ->
+            rebar_api:abort("Schemas ~p all map to the component name ~ts; rename one", [
+                Paths, Name
+            ])
+    end.
+
+-doc """
+Component names for schema files, given relative to `priv/schemas` as
+nova_json_schemas keys them: `v1/user.json` becomes `v1.user`. Characters
+an OpenAPI component name cannot hold become `_`; two files that end up
+with the same name are an error rather than one silently replacing the
+other.
+""".
+-spec component_names([file:filename()]) ->
+    {ok, [{binary(), file:filename()}]} | {error, {collision, binary(), [file:filename()]}}.
+component_names(Files) ->
+    Named = lists:sort([{component_name(File), File} || File <- Files]),
+    case [Name || {Name, _} <- Named] -- lists:usort([Name || {Name, _} <- Named]) of
+        [] ->
+            {ok, Named};
+        [Name | _] ->
+            {error, {collision, Name, [File || {N, File} <- Named, N =:= Name]}}
+    end.
+
+component_name(RelPath) ->
+    Segments = filename:split(filename:rootname(RelPath, ".json")),
+    Joined = unicode:characters_to_binary(lists:join(".", Segments)),
+    re:replace(Joined, "[^A-Za-z0-9._-]", "_", [global, unicode, {return, binary}]).
+
+load_schema(SchemaDir, File) ->
+    case file:read_file(filename:join(SchemaDir, File)) of
+        {ok, Bin} ->
+            try json:decode(Bin) of
+                Decoded when is_map(Decoded) ->
+                    {ok, component_schema(Decoded)};
+                _ ->
+                    rebar_api:warn("Schema is not a JSON object: ~s", [File]),
+                    error
+            catch
+                error:_ ->
+                    rebar_api:warn("Failed to parse schema: ~s", [File]),
+                    error
+            end;
+        {error, _} ->
+            error
+    end.
+
+-doc """
+A JSON Schema made fit for `components/schemas`. An OpenAPI 3.0 Schema
+Object has no `$schema` or `$id` keywords, nor the draft-04 `id`.
+""".
+-spec component_schema(map()) -> map().
+component_schema(Schema) ->
+    Stripped = maps:without([~"$schema", ~"$id"], Schema),
+    case Stripped of
+        #{~"id" := Id} when is_binary(Id) -> maps:remove(~"id", Stripped);
+        _ -> Stripped
     end.
 
 %% ===================================================================
 %% OpenAPI spec building
 %% ===================================================================
 build_spec(Title, Version, Routes, Schemas) ->
-    Paths = build_paths(Routes),
     Spec = #{
-        <<"openapi">> => <<"3.0.3">>,
-        <<"info">> => #{
-            <<"title">> => erlang:list_to_binary(Title),
-            <<"version">> => erlang:list_to_binary(Version)
+        ~"openapi" => ~"3.0.3",
+        ~"info" => #{
+            ~"title" => unicode:characters_to_binary(Title),
+            ~"version" => unicode:characters_to_binary(Version)
         },
-        <<"paths">> => Paths
+        ~"paths" => build_paths(Routes, Schemas)
     },
     case maps:size(Schemas) of
         0 -> Spec;
-        _ -> Spec#{<<"components">> => #{<<"schemas">> => Schemas}}
+        _ -> Spec#{~"components" => #{~"schemas" => Schemas}}
     end.
 
-build_paths(Routes) ->
-    FlatRoutes = lists:flatten(Routes),
-    Grouped = lists:foldl(
-        fun({Path, Method, Module, Function, Extra}, Acc) ->
-            PathMethods = maps:get(Path, Acc, #{}),
-            OpId = <<
-                (erlang:atom_to_binary(Module))/binary,
-                ".",
-                (erlang:atom_to_binary(Function))/binary
-            >>,
-            Params = extract_path_params(Path),
-            SchemaRef = schema_ref(Extra),
-            Operation0 = #{<<"operationId">> => OpId},
-            Operation1 =
-                case Params of
-                    [] -> Operation0;
-                    _ -> Operation0#{<<"parameters">> => Params}
-                end,
-            Operation2 = maybe_add_request_body(Method, SchemaRef, Operation1),
-            Operation3 = maybe_add_response_schema(Method, SchemaRef, Operation2),
-            Acc#{Path => PathMethods#{Method => Operation3}}
-        end,
-        #{},
-        FlatRoutes
-    ),
-    Grouped.
+build_paths(Routes, Schemas) ->
+    BaseIds = [operation_id(Module, Function) || {_, _, Module, Function, _} <- Routes],
+    Shared = BaseIds -- lists:usort(BaseIds),
+    Operations = [
+        {Path, Method, operation(Route, unique_id(Route, Shared), Schemas)}
+     || {Path, Method, _, _, _} = Route <- Routes
+    ],
+    Paths = lists:usort([Path || {Path, _, _} <- Operations]),
+    #{Path => #{M => Op || {P, M, Op} <- Operations, P =:= Path} || Path <- Paths}.
 
-schema_ref(#{json_schema := SchemaPath}) ->
-    Basename = filename:basename(SchemaPath, ".json"),
-    Name = unicode:characters_to_binary(Basename),
-    {ok, <<"#/components/schemas/", Name/binary>>};
-schema_ref(_) ->
+operation_id(Module, Function) ->
+    <<(atom_to_binary(Module))/binary, ".", (atom_to_binary(Function))/binary>>.
+
+%% operationId must be unique, so a handler serving several routes gets the
+%% method and path appended.
+unique_id({Path, Method, Module, Function, _Extra}, Shared) ->
+    Base = operation_id(Module, Function),
+    case lists:member(Base, Shared) of
+        true -> <<Base/binary, ":", Method/binary, ":", Path/binary>>;
+        false -> Base
+    end.
+
+operation({Path, Method, _Module, _Function, Extra}, OpId, Schemas) ->
+    Params = extract_path_params(Path),
+    Body = request_body(Method, schema_ref(Extra, Schemas)),
+    Operation0 = #{
+        ~"operationId" => OpId,
+        ~"responses" => responses(Method, Body =/= none, Params =/= [])
+    },
+    Operation1 =
+        case Params of
+            [] -> Operation0;
+            _ -> Operation0#{~"parameters" => Params}
+        end,
+    case Body of
+        none -> Operation1;
+        _ -> Operation1#{~"requestBody" => Body}
+    end.
+
+%% json_schema names the request-body schema, as nova_json_schemas reads it:
+%% a path such as "schemas/v1/user.json", relative to priv. A schema that
+%% was not loaded gets no $ref, which would dangle.
+schema_ref(#{json_schema := SchemaPath}, Schemas) when is_list(SchemaPath); is_binary(SchemaPath) ->
+    Name = component_name(schema_relative_path(unicode:characters_to_list(SchemaPath))),
+    case maps:is_key(Name, Schemas) of
+        true -> {ok, <<"#/components/schemas/", Name/binary>>};
+        false -> none
+    end;
+schema_ref(_Extra, _Schemas) ->
     none.
 
-maybe_add_request_body(Method, {ok, Ref}, Operation) when
-    Method =:= <<"post">>; Method =:= <<"put">>; Method =:= <<"patch">>
-->
-    Operation#{
-        <<"requestBody">> => #{
-            <<"required">> => true,
-            <<"content">> => #{
-                <<"application/json">> => #{
-                    <<"schema">> => #{<<"$ref">> => Ref}
-                }
-            }
-        }
-    };
-maybe_add_request_body(_Method, _SchemaRef, Operation) ->
-    Operation.
+schema_relative_path("./" ++ Path) -> schema_relative_path(Path);
+schema_relative_path("schemas/" ++ Path) -> Path;
+schema_relative_path(Path) -> Path.
 
-maybe_add_response_schema(_Method, {ok, Ref}, Operation) ->
-    Operation#{
-        <<"responses">> => #{
-            <<"200">> => #{
-                <<"description">> => <<"Successful response">>,
-                <<"content">> => #{
-                    <<"application/json">> => #{
-                        <<"schema">> => #{<<"$ref">> => Ref}
-                    }
-                }
-            }
-        }
+request_body(Method, {ok, Ref}) when
+    Method =:= ~"post"; Method =:= ~"put"; Method =:= ~"patch"
+->
+    #{
+        ~"required" => true,
+        ~"content" => #{~"application/json" => #{~"schema" => #{~"$ref" => Ref}}}
     };
-maybe_add_response_schema(_Method, none, Operation) ->
-    Operation#{
-        <<"responses">> => #{
-            <<"200">> => #{<<"description">> => <<"Successful response">>}
-        }
-    }.
+request_body(_Method, _SchemaRef) ->
+    none.
+
+responses(Method, HasBody, HasParams) ->
+    Success = success_response(Method),
+    WithBody =
+        case HasBody of
+            true -> Success#{~"400" => #{~"description" => ~"Invalid request body"}};
+            false -> Success
+        end,
+    case HasParams of
+        true -> WithBody#{~"404" => #{~"description" => ~"Not found"}};
+        false -> WithBody
+    end.
+
+success_response(~"post") -> #{~"201" => #{~"description" => ~"Created"}};
+success_response(~"delete") -> #{~"204" => #{~"description" => ~"No content"}};
+success_response(_Method) -> #{~"200" => #{~"description" => ~"Successful response"}}.
 
 extract_path_params(Path) ->
-    Segments = binary:split(Path, <<"/">>, [global]),
-    lists:filtermap(
-        fun(Segment) ->
-            case Segment of
-                <<"{", Rest/binary>> ->
-                    Name = binary:part(Rest, 0, byte_size(Rest) - 1),
-                    {true, #{
-                        <<"name">> => Name,
-                        <<"in">> => <<"path">>,
-                        <<"required">> => true,
-                        <<"schema">> => #{<<"type">> => <<"string">>}
-                    }};
-                _ ->
-                    false
-            end
-        end,
-        Segments
-    ).
-
-%% ===================================================================
-%% Swagger UI HTML
-%% ===================================================================
-swagger_html(SpecPath) ->
-    SpecFile = filename:basename(SpecPath),
     [
-        "<!DOCTYPE html>\n"
-        "<html lang=\"en\">\n"
-        "<head>\n"
-        "  <meta charset=\"UTF-8\">\n"
-        "  <title>Swagger UI</title>\n"
-        "  <link rel=\"stylesheet\" href=\"https://unpkg.com/swagger-ui-dist@5/swagger-ui.css\">\n"
-        "</head>\n"
-        "<body>\n"
-        "  <div id=\"swagger-ui\"></div>\n"
-        "  <script src=\"https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js\"></script>\n"
-        "  <script>\n"
-        "    SwaggerUIBundle({\n"
-        "      url: '",
-        SpecFile,
-        "',\n"
-        "      dom_id: '#swagger-ui',\n"
-        "      presets: [SwaggerUIBundle.presets.apis],\n"
-        "      layout: 'BaseLayout'\n"
-        "    });\n"
-        "  </script>\n"
-        "</body>\n"
-        "</html>\n"
+        #{
+            ~"name" => binary:part(Rest, 0, byte_size(Rest) - 1),
+            ~"in" => ~"path",
+            ~"required" => true,
+            ~"schema" => #{~"type" => ~"string"}
+        }
+     || <<"{", Rest/binary>> <- binary:split(Path, ~"/", [global])
     ].

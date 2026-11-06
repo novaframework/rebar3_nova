@@ -14,7 +14,10 @@
 -export([
     auto/0,
     flush/0,
-    watch_dirs/1
+    watch_dirs/1,
+    fs_backend/1,
+    watcher_problem/2,
+    reload_routes/1
 ]).
 
 -define(PROVIDER, serve).
@@ -75,35 +78,16 @@ do(State) ->
     State1 = remove_from_plugin_paths(State),
     rebar_prv_shell:do(State1).
 
--define(VALID_EXTENSIONS, [
-    <<"^(.*)?\.erl$">>,
-    <<"^(.*)?\.dtl$">>
-]).
-
 auto() ->
     receive
         {_Pid, {fs, file_event}, {ChangedFile, _Events}} ->
             Ext = filename:extension(unicode:characters_to_binary(ChangedFile)),
-            IsValid = lists:any(
-                fun(ValidExt) ->
-                    Result = re:run(Ext, ValidExt),
-                    case Result of
-                        {match, _Captured} -> true;
-                        match -> true;
-                        nomatch -> false
-                    end
-                end,
-                ?VALID_EXTENSIONS
-            ),
-            case IsValid of
+            case lists:member(Ext, [~".erl", ~".dtl"]) of
                 false ->
                     pass;
                 true ->
-                    % sleep here so messages can bottle up
-                    % or we can flush after compile?
                     timer:sleep(200),
                     flush(),
-                    %%rebar_agent:do(compile)
                     compile_file(Ext, ChangedFile)
             end
     end,
@@ -129,7 +113,44 @@ listen_on_project_apps(State) ->
         Dir <- watch_dirs(rebar_app_info:dir(AppInfo)),
         filelib:is_dir(Dir)
     ],
-    lists:foreach(fun watch/1, lists:enumerate(Dirs)).
+    OsType = os:type(),
+    case watcher_problem(OsType, watcher_found(fs_backend(OsType))) of
+        none ->
+            lists:foreach(fun watch/1, lists:enumerate(Dirs));
+        Problem ->
+            rebar_api:warn("~ts Code reloading is off; restart serve after installing it.", [
+                Problem
+            ])
+    end.
+
+-doc "The fs backend for an OS, mirroring the choice fs_sup makes.".
+-spec fs_backend({atom(), atom()}) -> module() | undefined.
+fs_backend({unix, darwin}) -> fsevents;
+fs_backend({unix, linux}) -> inotifywait;
+fs_backend({unix, freebsd}) -> inotifywait;
+fs_backend({unix, openbsd}) -> inotifywait;
+fs_backend({unix, sunos}) -> undefined;
+fs_backend({unix, _}) -> kqueue;
+fs_backend({win32, nt}) -> inotifywait_win32;
+fs_backend(_) -> undefined.
+
+watcher_found(undefined) -> unsupported;
+watcher_found(Backend) -> Backend:find_executable() =/= false.
+
+-doc "Why file watching cannot start, or `none` when it can.".
+-spec watcher_problem({atom(), atom()}, boolean() | unsupported) -> none | string().
+watcher_problem(_OsType, true) ->
+    none;
+watcher_problem(_OsType, unsupported) ->
+    "rebar3 nova serve cannot watch files on this OS.";
+watcher_problem({unix, linux}, false) ->
+    "rebar3 nova serve needs inotifywait to watch files. Install inotify-tools "
+    "(apt install inotify-tools, dnf install inotify-tools, pacman -S inotify-tools).";
+watcher_problem({unix, _}, false) ->
+    "rebar3 nova serve needs inotifywait to watch files. Install inotify-tools from ports or "
+    "packages.";
+watcher_problem(_OsType, false) ->
+    "rebar3 nova serve could not find the fs file watcher executable.".
 
 watch_dirs(AppDir) ->
     SrcDir = filename:join(AppDir, "src"),
@@ -166,28 +187,18 @@ remove_from_plugin_paths(State) ->
 
 compile_file(<<".erl">>, Filename) ->
     ErlOpts = [],
-    case is_routefile(Filename) of
-        true ->
-            [AppFile | _] = filelib:wildcard(filename:dirname(Filename) ++ "/../src/*.app.src"),
-            {ok, [{application, Application, _} | _]} = file:consult(AppFile),
-            rebar_api:info("Reloading routefile ~p", [Application]),
-            nova_router:compile(Application);
-        false ->
-            case compile:file(Filename, [binary, return_errors, return_warnings | ErlOpts]) of
-                {ok, ModuleName, Binary} ->
-                    rebar_api:info("Compiled ~p", [ModuleName]),
-                    {module, _Mod} = code:load_binary(ModuleName, Filename, Binary),
-                    code:purge(ModuleName);
-                {ok, ModuleName, Binary, Warnings} ->
-                    rebar_api:warn("Compiled ~p with warnings: ~p", [ModuleName, Warnings]),
-                    {module, _Mod} = code:load_binary(ModuleName, Filename, Binary),
-                    code:purge(ModuleName);
-                {error, Errors, Warnings} ->
-                    rebar_api:error("Could not compile ~p. Exited with errors: ~p~nWarnings: ~p", [
-                        Filename, Errors, Warnings
-                    ]),
-                    ok
-            end
+    case compile:file(Filename, [binary, return_errors, return_warnings | ErlOpts]) of
+        {ok, ModuleName, Binary} ->
+            rebar_api:info("Compiled ~p", [ModuleName]),
+            load(ModuleName, Filename, Binary);
+        {ok, ModuleName, Binary, Warnings} ->
+            rebar_api:warn("Compiled ~p with warnings: ~p", [ModuleName, Warnings]),
+            load(ModuleName, Filename, Binary);
+        {error, Errors, Warnings} ->
+            rebar_api:error("Could not compile ~p. Exited with errors: ~p~nWarnings: ~p", [
+                Filename, Errors, Warnings
+            ]),
+            ok
     end;
 compile_file(<<".dtl">>, Filename) ->
     case erlang:module_loaded(erlydtl) of
@@ -215,10 +226,80 @@ compile_file(<<".dtl">>, Filename) ->
             compile_file(<<".dtl">>, Filename)
     end.
 
-is_routefile([]) ->
-    false;
-is_routefile(".routes.erl") ->
-    %% Reload routes
-    true;
-is_routefile([_ | Tl]) ->
-    is_routefile(Tl).
+load(ModuleName, Filename, Binary) ->
+    {module, _Mod} = code:load_binary(ModuleName, Filename, Binary),
+    code:purge(ModuleName),
+    reload_routes(ModuleName).
+
+-doc """
+Re-register the routes of every compiled application whose router is
+`Module`, so an edited router takes effect without a restart. An application
+from `nova_apps` keeps the options of its entry there. Only the default
+dispatch table is refreshed: applications on listeners of their own are not.
+""".
+-spec reload_routes(module()) -> [atom()].
+reload_routes(Module) ->
+    Apps = [
+        {App, Prefix}
+     || {App, Prefix} <- compiled_apps(),
+        rebar3_nova_utils:router_module(App) =:= Module
+    ],
+    [reload_app(App, Prefix) || {App, Prefix} <- Apps].
+
+compiled_apps() ->
+    try
+        nova_router:compiled_apps()
+    catch
+        error:_ -> []
+    end.
+
+reload_app(App, Prefix) ->
+    ok = nova_router:remove_application(App),
+    _ = nova_router:compile([{App, app_options(App, Prefix)}]),
+    rebar_api:info("Reloaded routes for ~p", [App]),
+    App.
+
+%% An app listed in nova_apps is compiled with the options of its entry there
+%% (prefix, secure, plugins, plugin_strategy, ...), found the way Nova
+%% resolves nested nova_apps: depth first from the bootstrap application.
+app_options(App, Prefix) ->
+    case nova:get_main_app() of
+        {ok, Bootstrap} when Bootstrap =/= App ->
+            case declared_options(App, nova_apps(Bootstrap), [Bootstrap]) of
+                {found, Options} -> Options;
+                {not_found, _Seen} -> prefix_options(Prefix)
+            end;
+        _ ->
+            prefix_options(Prefix)
+    end.
+
+declared_options(_App, [], Seen) ->
+    {not_found, Seen};
+declared_options(App, [Entry | Rest], Seen) ->
+    case nova_app_entry(Entry) of
+        {App, Options} ->
+            {found, Options};
+        {Name, _Options} ->
+            case lists:member(Name, Seen) of
+                true ->
+                    declared_options(App, Rest, Seen);
+                false ->
+                    case declared_options(App, nova_apps(Name), [Name | Seen]) of
+                        {found, _} = Found -> Found;
+                        {not_found, Seen1} -> declared_options(App, Rest, Seen1)
+                    end
+            end
+    end.
+
+nova_app_entry({Name, Options}) when is_atom(Name), is_map(Options) -> {Name, Options};
+nova_app_entry(Name) when is_atom(Name) -> {Name, #{}}.
+
+nova_apps(App) ->
+    case application:get_env(App, nova_apps, []) of
+        Apps when is_list(Apps) -> Apps;
+        _ -> []
+    end.
+
+prefix_options("/") -> #{};
+prefix_options("") -> #{};
+prefix_options(Prefix) -> #{prefix => Prefix}.

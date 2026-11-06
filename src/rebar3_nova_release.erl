@@ -2,6 +2,9 @@
 
 -export([init/1, do/1, format_error/1]).
 
+%% Exported for rebar3_nova_commands_SUITE.
+-export([as_args/1]).
+
 -define(PROVIDER, release).
 -define(DEPS, [{default, compile}]).
 
@@ -37,21 +40,19 @@ do(State) ->
             ok
     end,
 
-    ProfileAtom = erlang:list_to_atom(Profile),
-    Providers = rebar_state:providers(State),
-    case providers:get_provider(release, Providers, default) of
-        not_found ->
-            rebar_api:abort("Release provider not found. Is relx configured?", []);
-        ReleaseProvider ->
-            State1 = rebar_state:current_profiles(State, [ProfileAtom]),
-            case providers:do(ReleaseProvider, State1) of
-                {ok, State2} ->
-                    rebar_api:info("Release built successfully with profile '~s'", [Profile]),
-                    {ok, State2};
-                {error, Err} ->
-                    rebar_api:abort("Release failed: ~p", [Err])
-            end
+    rebar_api:info("Building release with profile '~s'", [Profile]),
+    case rebar_prv_as:do(rebar_state:command_args(State, as_args(Profile))) of
+        {ok, State1} ->
+            rebar_api:info("Release built successfully with profile '~s'", [Profile]),
+            {ok, State1};
+        {error, Err} ->
+            rebar_api:abort("Release failed: ~p", [Err])
     end.
+
+-doc "Arguments for `rebar3 as`, so the release runs exactly like `rebar3 as Profile release`.".
+-spec as_args(string()) -> [string()].
+as_args(Profile) ->
+    [Profile, "release"].
 
 -spec format_error(any()) -> iolist().
 format_error(Reason) ->

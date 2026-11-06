@@ -16,7 +16,7 @@ rebar3 nova gen_controller   # Generate controller module
 rebar3 nova gen_resource     # Generate controller + schema + route snippets
 rebar3 nova gen_test         # Generate CT test suite
 rebar3 nova gen_auth         # Generate email/password auth scaffolding
-rebar3 nova openapi          # Generate OpenAPI spec to priv/assets/
+rebar3 nova openapi          # Generate OpenAPI spec to priv/assets/ (--prefix /api, --output)
 rebar3 nova middleware       # Show plugin/middleware chains
 rebar3 nova config           # Show Nova configuration
 rebar3 nova audit            # Security audit of routes
@@ -32,14 +32,15 @@ rebar3 nova release          # Build release (regenerates OpenAPI if schemas exi
 - `rebar3_nova_gen_controller.erl` — controller scaffolding
 - `rebar3_nova_gen_resource.erl` — full resource scaffolding (controller + schema + routes)
 - `rebar3_nova_gen_test.erl` — CT test suite generation
-- `rebar3_nova_gen_auth.erl` — email/password auth scaffolding (9 files)
-- `rebar3_nova_openapi.erl` — OpenAPI 3.0.3 spec + Swagger UI HTML (outputs to priv/assets/)
+- `rebar3_nova_gen_auth.erl` - email/password auth scaffolding (9 files)
+- `rebar3_nova_openapi.erl` - OpenAPI 3.0.3 spec (outputs to priv/assets/ unless --output)
 - `rebar3_nova_middleware.erl` — middleware/plugin chain display
 - `rebar3_nova_config.erl` — Nova config display
 - `rebar3_nova_audit.erl` — route security audit
 - `rebar3_nova_doctor.erl` — project health checks across toolchain, config, routes, deps, security hygiene, build
 - `rebar3_nova_release.erl` — release builder (wraps rebar3 release)
-- `rebar3_nova_utils.erl` — shared helpers (app name/dir, ensure_dir, file writing)
+- `rebar3_nova_utils.erl` - shared helpers (app name/dir, file writing, `compile_routes/2` with the project's nova, `router_module/1`)
+- `rebar3_nova_dispatch.erl` - reads a compiled dispatch table; `handler/1` classifies a route's handler
 
 ## Templates
 - `priv/templates/nova/` — Erlang project scaffold
