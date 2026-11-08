@@ -13,6 +13,7 @@
 ]).
 
 -include("nova_router.hrl").
+-include_lib("kernel/include/file.hrl").
 
 -define(PROVIDER, openapi).
 -define(DEPS, [{default, compile}]).
@@ -133,7 +134,7 @@ expand_methods(Method, Path, Module, Function, Extra) ->
 %% ===================================================================
 load_schemas(AppDir) ->
     SchemaDir = filename:join([AppDir, "priv", "schemas"]),
-    Files = filelib:wildcard("**/*.json", unicode:characters_to_list(SchemaDir)),
+    Files = schema_files(unicode:characters_to_list(SchemaDir)),
     case component_names(Files) of
         {ok, Named} ->
             maps:from_list([
@@ -185,6 +186,35 @@ load_schema(SchemaDir, File) ->
             end;
         {error, _} ->
             error
+    end.
+
+%% Symlinks below priv/schemas are never followed: the spec may be
+%% published, and a link could pull in any file on the machine.
+schema_files(SchemaDir) ->
+    lists:append([schema_files(SchemaDir, [Name]) || Name <- list_dir(SchemaDir)]).
+
+schema_files(SchemaDir, RelPath) ->
+    Path = filename:join([SchemaDir | RelPath]),
+    RelName = filename:join(RelPath),
+    case file:read_link_info(Path) of
+        {ok, #file_info{type = directory}} ->
+            lists:append([schema_files(SchemaDir, RelPath ++ [Name]) || Name <- list_dir(Path)]);
+        {ok, #file_info{type = regular}} ->
+            case filename:extension(RelName) of
+                ".json" -> [RelName];
+                _ -> []
+            end;
+        {ok, #file_info{type = symlink}} ->
+            rebar_api:warn("Skipping ~ts under priv/schemas: it is a symlink", [RelName]),
+            [];
+        _ ->
+            []
+    end.
+
+list_dir(Dir) ->
+    case file:list_dir(Dir) of
+        {ok, Names} -> Names;
+        {error, _} -> []
     end.
 
 -doc """

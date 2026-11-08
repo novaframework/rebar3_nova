@@ -27,6 +27,7 @@
     openapi_nested_schemas_are_loaded_by_relative_path/1,
     openapi_same_basename_schemas_do_not_collide/1,
     openapi_component_name_collision_is_an_error/1,
+    openapi_symlinked_schemas_are_skipped/1,
     openapi_unknown_schema_gets_no_ref/1,
     openapi_default_output_is_the_assets_dir/1,
     unrecognised_handlers_are_reported/1,
@@ -62,6 +63,7 @@ all() ->
         openapi_nested_schemas_are_loaded_by_relative_path,
         openapi_same_basename_schemas_do_not_collide,
         openapi_component_name_collision_is_an_error,
+        openapi_symlinked_schemas_are_skipped,
         openapi_unknown_schema_gets_no_ref,
         openapi_default_output_is_the_assets_dir,
         unrecognised_handlers_are_reported,
@@ -345,6 +347,32 @@ openapi_component_name_collision_is_an_error(_Config) ->
     ),
     ?assertMatch({ok, [_, _]}, rebar3_nova_openapi:component_names(["a/b.json", "a_b.json"])).
 
+openapi_symlinked_schemas_are_skipped(Config) ->
+    Root = filename:join(?config(priv_dir, Config), "symlink_app"),
+    Outside = filename:join(Root, "outside"),
+    write_schema(Outside, "secret.json", #{~"title" => ~"secret"}),
+    SchemaDir = filename:join([Root, "priv", "schemas"]),
+    write_schema(SchemaDir, "nested/tag.json", #{~"type" => ~"object"}),
+    Links = [
+        {filename:join(Outside, "secret.json"), filename:join(SchemaDir, "x.json")},
+        {Outside, filename:join(SchemaDir, "linked")},
+        {"..", filename:join([SchemaDir, "nested", "loop"])}
+    ],
+    case [file:make_symlink(Target, Link) || {Target, Link} <- Links] of
+        [ok, ok, ok] ->
+            Output = capture(fun() ->
+                ?assertEqual(
+                    [~"nested.tag"], maps:keys(rebar3_nova_openapi:load_schemas(Root))
+                )
+            end),
+            [
+                ?assertNotEqual(nomatch, string:find(Output, "Skipping " ++ Link))
+             || Link <- ["x.json ", "linked ", "nested/loop "]
+            ];
+        _ ->
+            {skip, symlinks_unsupported}
+    end.
+
 openapi_unknown_schema_gets_no_ref(_Config) ->
     Paths = spec_paths([
         {~"/x", ~"post", test_controller, create, #{json_schema => "schemas/missing.json"}}
@@ -388,7 +416,8 @@ capture(Fun) ->
             exit(normal)
         end),
     receive
-        {'DOWN', MonRef, process, Pid, _Reason} -> ok
+        {'DOWN', MonRef, process, Pid, normal} -> ok;
+        {'DOWN', MonRef, process, Pid, Reason} -> ct:fail(Reason)
     after 5000 ->
         ct:fail(capture_timeout)
     end,
