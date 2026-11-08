@@ -307,13 +307,14 @@ otel_flag(_Config) ->
      || Dep <- [
             {opentelemetry, "~> 1.7"},
             {opentelemetry_api, "~> 1.5"},
-            {opentelemetry_experimental, "~> 0.6"},
+            {opentelemetry_experimental, "~> 0.6.0"},
             {opentelemetry_exporter, "~> 1.11"},
-            {opentelemetry_nova, "~> 0.5"}
+            {opentelemetry_nova, "~> 0.5.1"}
         ]
     ],
 
-    {ok, [{application, _, AppSpec}]} = file:consult(Name ++ "/src/testapp_otel.app.src"),
+    {ok, [{application, _, AppSpec}]} =
+        file:consult(filename:join([Name, "src", "testapp_otel.app.src"])),
     ?assertEqual(
         [
             kernel,
@@ -328,31 +329,51 @@ otel_flag(_Config) ->
     ),
 
     AppErl = read_file(Name, "src/testapp_otel_app.erl"),
-    assert_contains(AppErl, "ok = opentelemetry_nova:setup()"),
+    assert_contains(
+        AppErl,
+        "start(_StartType, _StartArgs) ->\n"
+        "    ok = opentelemetry_nova:setup(),\n"
+        "    testapp_otel_sup:start_link().\n"
+    ),
 
     [assert_otel_wiring(Name, File) || File <- ["dev_sys.config.src", "prod_sys.config.src"]],
 
-    {ok, [Dev]} = consult_env_substituted(Name ++ "/config/dev_sys.config.src"),
+    Dev = consult_sys_config(Name, "dev_sys.config.src"),
     ?assertEqual(
         [{span_processor, simple}, {traces_exporter, {otel_exporter_stdout, []}}],
         prop(opentelemetry, Dev)
     ),
+    ?assertEqual(undefined, prop(opentelemetry_experimental, Dev)),
+    ?assertEqual(undefined, prop(opentelemetry_nova, Dev)),
 
-    ProdConfig = read_file(Name, "config/prod_sys.config.src"),
-    assert_not_contains(ProdConfig, "OTEL_ENDPOINT"),
-    {ok, [Prod]} = consult_env_substituted(Name ++ "/config/prod_sys.config.src"),
+    assert_not_contains(read_file(Name, "config/prod_sys.config.src"), "OTEL_ENDPOINT"),
+    Prod = consult_sys_config(Name, "prod_sys.config.src"),
     ?assertEqual(
         [{span_processor, batch}, {traces_exporter, otlp}],
         prop(opentelemetry, Prod)
     ),
     ?assertEqual(undefined, prop(opentelemetry_exporter, Prod)),
+    ?assertMatch(
+        [
+            #{
+                module := otel_metric_reader,
+                config := #{exporter := {otel_exporter_metrics_otlp, #{}}, export_interval_ms := _}
+            }
+        ],
+        prop(readers, prop(opentelemetry_experimental, Prod))
+    ),
+    ?assertEqual([{trust_incoming_context, false}], prop(opentelemetry_nova, Prod)),
 
     ok.
 
 otel_flag_with_lfe(_Config) ->
     Name = "testapp_otel_lfe",
     rebar3_nova_new:generate_project(Name, (default_flags())#{otel => true, lfe => true}),
-    assert_contains(read_file(Name, "src/testapp_otel_lfe_app.lfe"), "(opentelemetry_nova:setup)"),
+    assert_contains(
+        read_file(Name, "src/testapp_otel_lfe_app.lfe"),
+        "  (let (('ok (opentelemetry_nova:setup)))\n"
+        "    (testapp_otel_lfe.sup:start_link)))\n"
+    ),
     [assert_otel_wiring(Name, File) || File <- ["dev_sys.config.src", "prod_sys.config.src"]].
 
 otel_flag_with_arizona(_Config) ->
@@ -360,9 +381,14 @@ otel_flag_with_arizona(_Config) ->
     rebar3_nova_new:generate_project(Name, (default_flags())#{otel => true, arizona => true}),
     [
         begin
-            {ok, [Terms]} = consult_env_substituted(Name ++ "/config/" ++ File),
-            #{middleware_handlers := [arizona_cowboy_middleware | _]} =
-                prop(cowboy_configuration, prop(nova, Terms)),
+            ?assertMatch(
+                #{middleware_handlers := [arizona_cowboy_middleware | _]},
+                prop(cowboy_configuration, prop(nova, consult_sys_config(Name, File)))
+            ),
+            assert_contains(
+                read_file(Name, "config/" ++ File),
+                "otel_nova_stream_h still creates their server spans"
+            ),
             assert_otel_wiring(Name, File)
         end
      || File <- ["dev_sys.config.src", "prod_sys.config.src"]
@@ -381,17 +407,22 @@ no_otel_without_flag(_Config) ->
             "config/prod_sys.config.src"
         ]
     ],
-    {ok, [Terms]} = consult_env_substituted(Name ++ "/config/dev_sys.config.src"),
-    Nova = prop(nova, Terms),
-    ?assertEqual(#{port => 8080}, prop(cowboy_configuration, Nova)),
-    ?assertEqual(
-        [{pre_request, nova_request_plugin, #{decode_json_body => true}}],
-        prop(plugins, Nova)
-    ).
+    [
+        begin
+            Terms = consult_sys_config(Name, File),
+            Nova = prop(nova, Terms),
+            ?assertNot(maps:is_key(stream_handlers, prop(cowboy_configuration, Nova)), File),
+            ?assertEqual(false, lists:keyfind(otel_nova_plugin, 2, prop(plugins, Nova)), File),
+            [
+                ?assertEqual(undefined, prop(App, Terms), {File, App})
+             || App <- [opentelemetry, opentelemetry_experimental, opentelemetry_nova]
+            ]
+        end
+     || File <- ["dev_sys.config.src", "prod_sys.config.src"]
+    ].
 
 assert_otel_wiring(Name, File) ->
-    {ok, [Terms]} = consult_env_substituted(Name ++ "/config/" ++ File),
-    Nova = prop(nova, Terms),
+    Nova = prop(nova, consult_sys_config(Name, File)),
     ?assertMatch(
         #{
             stream_handlers := [
@@ -406,6 +437,10 @@ assert_otel_wiring(Name, File) ->
         prop(plugins, Nova),
         File
     ).
+
+consult_sys_config(Name, File) ->
+    {ok, [Terms]} = consult_env_substituted(Name ++ "/config/" ++ File),
+    Terms.
 
 erlydtl_provider_hooks(_Config) ->
     Hook = {provider_hooks, [{pre, [{compile, {erlydtl, compile}}]}]},

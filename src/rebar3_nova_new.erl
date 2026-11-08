@@ -197,9 +197,9 @@ rebar_deps(Flags) ->
                 [
                     ",\n    {opentelemetry, \"~> 1.7\"},\n",
                     "    {opentelemetry_api, \"~> 1.5\"},\n",
-                    "    {opentelemetry_experimental, \"~> 0.6\"},\n",
+                    "    {opentelemetry_experimental, \"~> 0.6.0\"},\n",
                     "    {opentelemetry_exporter, \"~> 1.11\"},\n",
-                    "    {opentelemetry_nova, \"~> 0.5\"}"
+                    "    {opentelemetry_nova, \"~> 0.5.1\"}"
                 ];
             false ->
                 []
@@ -412,10 +412,11 @@ app_src_applications(Flags) ->
 
 generate_app(Name, #{lfe := true} = Flags) ->
     Path = filename:join([Name, "src", Name ++ "_app.lfe"]),
-    Otel =
+    StartSup = ["(", Name, ".sup:start_link)"],
+    Start =
         case maps:get(otel, Flags) of
-            true -> ["  (opentelemetry_nova:setup)\n"];
-            false -> []
+            true -> ["  (let (('ok (opentelemetry_nova:setup)))\n    ", StartSup, "))\n\n"];
+            false -> ["  ", StartSup, ")\n\n"]
         end,
     Content = [
         "(defmodule ",
@@ -431,10 +432,7 @@ generate_app(Name, #{lfe := true} = Flags) ->
         "  (log-info \"Starting ",
         Name,
         " application ...\")\n",
-        Otel,
-        "  (",
-        Name,
-        ".sup:start_link))\n\n",
+        Start,
         "(defun stop ()\n",
         "  (",
         Name,
@@ -759,7 +757,8 @@ sys_config_nova(Name, Env, Flags) ->
 sys_config_stream_handlers(#{otel := true}) ->
     [
         ",\n",
-        "         %% otel_nova_stream_h must come first: it starts and ends the server span.\n",
+        "         %% nova_sup's default handlers, with otel_nova_stream_h first: it starts\n",
+        "         %% and ends the server span.\n",
         "         stream_handlers => [\n",
         "             otel_nova_stream_h,\n",
         "             nova_stream_h,\n",
@@ -772,7 +771,8 @@ sys_config_stream_handlers(_Flags) ->
 
 sys_config_otel_plugin(#{otel := true}) ->
     [
-        "         %% First, so later plugins and controllers run inside the server span.\n",
+        "         %% First: it attaches the trace context, so spans from later plugins and\n",
+        "         %% controllers are children of the server span.\n",
         "         {pre_request, otel_nova_plugin, #{}},\n"
     ];
 sys_config_otel_plugin(_Flags) ->
@@ -888,11 +888,11 @@ sys_config_db(Name, prod, #{pgo := true}) ->
 sys_config_db(_Name, _Env, _Flags) ->
     [].
 
-sys_config_arizona(Name, #{arizona := true}) ->
+sys_config_arizona(Name, #{arizona := true} = Flags) ->
     [
         " {arizona_nova, [\n",
         "     %% These routes are served by arizona_cowboy_middleware, before nova_router,\n",
-        "     %% so the global Nova plugins (CSRF, auth, headers, otel) do not run on them.\n",
+        arizona_plugins_comment(Flags),
         "     {routes, [\n",
         "         {live, ~\"/\", ",
         Name,
@@ -907,6 +907,15 @@ sys_config_arizona(Name, #{arizona := true}) ->
 sys_config_arizona(_Name, _Flags) ->
     [].
 
+arizona_plugins_comment(#{otel := true}) ->
+    [
+        "     %% so the global Nova plugins (CSRF, auth, headers) do not run on them.\n",
+        "     %% otel_nova_stream_h still creates their server spans, but without the\n",
+        "     %% route name, and their own spans are not children of the server span.\n"
+    ];
+arizona_plugins_comment(_Flags) ->
+    "     %% so the global Nova plugins (CSRF, auth, headers, otel) do not run on them.\n".
+
 sys_config_otel(dev, #{otel := true}) ->
     [
         " {opentelemetry, [\n",
@@ -920,6 +929,19 @@ sys_config_otel(prod, #{otel := true}) ->
         "     {span_processor, batch},\n",
         "     %% OTLP over HTTP to OTEL_EXPORTER_OTLP_ENDPOINT, default http://localhost:4318\n",
         "     {traces_exporter, otlp}\n",
+        " ]},\n",
+        " {opentelemetry_experimental, [\n",
+        "     %% HTTP server metrics over OTLP to the same endpoint, path /v1/metrics\n",
+        "     {readers, [\n",
+        "         #{module => otel_metric_reader,\n",
+        "           config => #{export_interval_ms => 10000,\n",
+        "                       exporter => {otel_exporter_metrics_otlp, #{}}}}\n",
+        "     ]}\n",
+        " ]},\n",
+        " {opentelemetry_nova, [\n",
+        "     %% Ignore traceparent and baggage from clients. Set to true only behind a\n",
+        "     %% gateway that strips or sets these headers itself.\n",
+        "     {trust_incoming_context, false}\n",
         " ]}"
     ];
 sys_config_otel(_Env, _Flags) ->
