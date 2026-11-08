@@ -29,9 +29,9 @@ What the generated app can enforce is set by what Nova validates today:
 - A route group's `security` defaults to open, and pre-request plugins run
   before the security callback, so schema validation runs for callers with
   no credentials.
-- jesse runs `pattern` and `patternProperties` with OTP `re` and its default
-  match limit, so a pathological pattern costs seconds of CPU per request.
-  `uniqueItems` is quadratic in the array length.
+- jesse runs `pattern` with OTP `re` and its default match limit, so a
+  pathological pattern costs seconds of CPU per request. `uniqueItems` is
+  quadratic in the array length.
 - Nova reads `:name` in a route path as a binding and `[...]` as a
   catch-all.
 
@@ -58,6 +58,12 @@ command with the same behaviour.
   only part of themselves (`{a}.{b}`) and Nova's own `:name` and `[...]`
   syntax. A parameter name follows the identifier rule below, so `{postId}`
   becomes `:post_id`.
+- Under the same prefix, every path must bind a position to the same name,
+  and no literal segment there may equal that name. `/u/{id}` beside
+  `/u/{userId}/posts`, or `/u/{id}` beside `/u/id`, would shadow each other
+  in Nova's router, so both are refused.
+- A parameter's `in` must be `path`, `query`, `header` or `cookie`, and
+  response keys must be status codes (`200`, `2XX`) or `default`.
 
 ### Names
 
@@ -68,17 +74,22 @@ Every name from the spec is validated before any file is written.
   derived from a method and path. Each is converted from camelCase to
   snake_case and must then match `\A[a-z][a-z0-9_]{0,63}\z` (`\z`, because
   `$` also matches before a trailing newline) and not be an Erlang reserved
-  word. Two names that convert to the same identifier are refused.
-  Otherwise generation aborts.
+  word. A name that becomes a function must also not be an auto-imported
+  arity-1 BIF, such as `get` or `length`, or `module_info`. Two names that
+  convert to the same identifier, such as the tags `userAdmin` and
+  `user_admin`, are refused. Otherwise generation aborts.
 - An operation without a tag goes to the `default` controller; one without
   an `operationId` is named from its method and path.
 - Component names must match `\A[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*\z`, and two
   that differ only in case are refused, since they would overwrite each other
-  on case-insensitive file systems. A `.` becomes a directory separator, the
-  reverse of how `rebar3 nova openapi` names components, and the resulting
-  path is checked with `filelib:safe_relative_path/2`.
-- Text copied into comments has its newlines removed. Strings written into
-  source are formatted with `~tp`.
+  on case-insensitive file systems, as are segments that are Windows device
+  names (`con`, `aux`, `com1` and so on, in any case). A `.` becomes a
+  directory separator, the reverse of how `rebar3 nova openapi` names
+  components. The pattern already rules out `..`; the writer still checks
+  each path with `filelib:safe_relative_path/2` when it writes the file.
+- Summaries and parameter names, which end up in comments, have their line
+  breaks replaced before they reach the writer. Strings written into source
+  are formatted with `~tp`.
 
 ### Ownership
 
@@ -109,21 +120,40 @@ ignore it.
   still rejects null.
 - Boolean `exclusiveMinimum` and `exclusiveMaximum` become the numeric form.
 - `readOnly` properties are removed from `required`, or every create request
-  would be rejected.
+  would be rejected, and are kept with `not: {}`, so a request that sets one
+  fails validation instead of reaching a controller that casts the whole
+  body. `rebar3 nova openapi` drops the `not: {}` again, since 3.0's
+  `readOnly` says the same.
 - `discriminator`, `example`, `xml`, `externalDocs`, `writeOnly` and `x-*`
   are removed.
-- `$id` and `id` are removed, since they change how jesse resolves relative
-  refs. `$schema` is set to draft-06.
+- `$id` and `id` abort generation like any keyword outside the list: 3.0
+  has neither, and both would change how jesse resolves relative refs.
+  `$schema` is set to draft-06.
 - `#/components/schemas/X` becomes a path to `X`'s file relative to the file
   holding the ref. Refs to other component types are inlined; a cycle
   through an inlined ref aborts.
 - Each `format` jesse does not enforce produces a warning.
-- A `pattern` must come with `maxLength`, and `uniqueItems` with `maxItems`.
-  Each `pattern` and `patternProperties` key is linted: it is refused when it
-  is longer than a fixed cap or nests quantifiers. `--allow-patterns` lets a
-  refused pattern through with a warning.
+- `uniqueItems` must come with `maxItems`.
+- A `pattern` must come with a `maxLength` of at most 1024. The pattern is
+  refused when it is longer than 200 bytes, uses `\Q...\E` or `(?#...)`,
+  or repeats a group that holds an unbounded or large repetition or an
+  alternation (`(a+)+`, `(a|a)*`, `(a+){1,99}`, counting PCRE2 forms such as
+  `{1, }` and `{,5}`). It is then run against subjects of the longest length
+  `maxLength` allows, each one unit repeated and ending in a character that
+  forces a backtrack, and refused if any hits a match limit of 1,000,000.
+  `--allow-patterns` lets a refused pattern through with a warning.
+- The `maxLength` guard relies on jesse's keyword order: for a schema of up
+  to 32 keywords jesse checks them in sorted order and stops at the first
+  error, so `maxLength` runs before `pattern`. If nova_json_schemas ever
+  collects every error, an oversized string reaches the pattern; the length
+  cap and the probe are what bound the cost then, alongside the body-limit
+  plugin.
 
-An inline request body becomes `<operation>_request.json`.
+An inline request body becomes `<operation>_request.json`. A request body
+that is not `required` gets a warning, because nova_json_schemas validates
+whatever body arrives. A body with no `application/json` content, including
+`application/*+json` and content types with parameters, gets a warning and
+no schema.
 
 ### Routes and security
 
@@ -135,12 +165,17 @@ Security fails closed.
   `nova_request_plugin`, then `nova_json_schemas`.
 - A route is `{Path, fun Mod:Fun/1, #{methods => [M], extra_state =>
   #{json_schema => "schemas/openapi/..."}}}`.
-- Each requirement, including an empty `{}` alternative and OAuth2 scopes,
-  gets a function in `<app>_api_security` that returns `{false, 401, #{}}`
-  until it is written. Nothing claims scopes are enforced.
+- Nova takes one security callback per route group, so each distinct
+  effective requirement list is one group with one function,
+  `security_group_N`, in `<app>_api_security`. Lists that differ only in the
+  order of their alternatives, schemes or scopes are the same group. The
+  function returns `{false, 401, #{}}` until it is written, whatever the list
+  holds, including an empty `{}` alternative and OAuth2 scopes. Nothing
+  claims scopes are enforced. Group names that clash with a security scheme's
+  function are refused.
 - An operation with no requirement, from neither the operation nor the root,
-  gets the same 401 stub. Only an explicit `security: []` gives a group with
-  `security => false`.
+  gets the group `security_undeclared`, the same 401 stub. Only an explicit
+  `security: []` gives a group with `security => false`.
 - A requirement that names an undefined scheme aborts generation.
 - Groups with security leave `render_errors` off, because schema errors are
   produced before the security callback runs.
@@ -169,15 +204,25 @@ and method to its path parameter names, its translated request schema and
 its controller and function.
 
 - `--check` compares the projection of the spec with the projection of
-  `rebar3 nova openapi` run on the compiled app. It writes nothing and exits
-  non-zero on a difference.
+  `rebar3 nova openapi` run on the compiled app, keeping only the routes
+  served by the generated controllers listed in the manifest, so a health
+  check or other hand-written route in the same app is not a difference.
+  It writes nothing and exits non-zero on a difference. An operation it
+  cannot read, such as one without an `operationId`, is reported as a
+  difference.
+- `rebar3 nova openapi` emits OpenAPI 3.0 schemas (`nullable`, boolean
+  exclusive bounds), so its schemas are translated back to draft-06 before
+  they are compared.
 - Round trip: the two projections are equal for a freshly generated app.
-- Fixed point: generating from the output of `rebar3 nova openapi` writes
-  identical files.
+- Fixed point: the output of `rebar3 nova openapi` on a generated app is a
+  3.0 spec the generator accepts, and generating from it gives the same
+  projection. Files are not compared byte for byte, because the forward
+  spec drops what is outside the projection.
 
 Responses, parameter types, query and header parameters, security, `info`
 and descriptions are outside the projection, because `rebar3 nova openapi`
-synthesises or drops them.
+synthesises or drops them. In particular `--check` does not notice a
+security function that was edited to let everyone in.
 
 ## Consequences
 
@@ -191,7 +236,8 @@ synthesises or drops them.
 - A generated app rejects requests to secured operations until their
   security functions are written.
 - 3.1 and YAML specs need converting before generation.
-- The generator depends on nova_json_schemas ADR 0001 and on
-  `rebar3 nova openapi` pointing component `$ref`s at components.
+- The generator depends on nova_json_schemas ADR 0001, on
+  `rebar3 nova openapi` pointing component `$ref`s at components, and on it
+  emitting OpenAPI 3.0 schema keywords.
 - The keyword allow-list follows jesse. If nova_json_schemas moves to a
   validator with JSON Schema 2020-12, 3.1 support should be revisited.
