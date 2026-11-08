@@ -50,7 +50,7 @@ rebar3 nova release          # Build release (rebar3 as <profile> release)
 - `priv/templates/nova_websocket.template` — WebSocket module
 
 ## Architecture
-Uses rebar3 provider pattern. Each command is a separate provider module in the `nova` namespace. All depend on `{default, compile}`.
+Uses rebar3 provider pattern. Each command is a separate provider module in the `nova` namespace. All depend on `{default, compile}` except `release`, which runs `rebar3 as <profile> release` without compiling the default profile first: a default compile leaves `_build/default` on the code path, and ErlyDTL then skips templates it can already load, so they miss the release.
 
 ## Git workflow
 Default branch is `master`. NEVER push directly — always create a PR.

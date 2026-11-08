@@ -5,6 +5,8 @@
 
 -export([all/0, suite/0, init_per_suite/1]).
 -export([
+    release_matches_rebar3_as_profile_release/1,
+    release_contains_compiled_templates/1,
     release_leaves_the_openapi_spec_alone/1
 ]).
 
@@ -17,6 +19,8 @@ suite() ->
 
 all() ->
     [
+        release_matches_rebar3_as_profile_release,
+        release_contains_compiled_templates,
         release_leaves_the_openapi_spec_alone
     ].
 
@@ -26,9 +30,18 @@ init_per_suite(Config) ->
             {fail, "rebar3 is not on PATH"};
         Rebar3 ->
             App = fixture(?config(priv_dir, Config)),
+            ok = rebar3(Rebar3, App, ["as", "prod", "release"]),
+            AsProfile = release_ebin(App),
+            ok = file:del_dir_r(filename:join([App, "_build", "prod"])),
             ok = rebar3(Rebar3, App, ["nova", "release"]),
-            [{app, App} | Config]
+            [{app, App}, {as_profile_ebin, AsProfile}, {nova_ebin, release_ebin(App)} | Config]
     end.
+
+release_matches_rebar3_as_profile_release(Config) ->
+    ?assertEqual(?config(as_profile_ebin, Config), ?config(nova_ebin, Config)).
+
+release_contains_compiled_templates(Config) ->
+    ?assert(lists:member("tpl_hello_dtl.beam", ?config(nova_ebin, Config))).
 
 %% `priv/assets` is served publicly; a spec the app generates with its own
 %% options must survive a release.
@@ -74,6 +87,11 @@ fixture_rebar_config() ->
 
 plugin_files() ->
     ["rebar.config", "rebar.lock", "src", "priv"].
+
+release_ebin(App) ->
+    Ebin = filename:join([App, "_build", "prod", "rel", "tpl", "lib", "tpl-0.1.0", "ebin"]),
+    {ok, Files} = file:list_dir(Ebin),
+    lists:sort(Files).
 
 rebar3(Rebar3, Dir, Args) ->
     Port = open_port(

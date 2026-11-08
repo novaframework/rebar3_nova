@@ -6,7 +6,10 @@
 -export([as_args/1]).
 
 -define(PROVIDER, release).
--define(DEPS, [{default, compile}]).
+%% No compile dependency: compiling the default profile first puts its ebin
+%% dirs on the code path, and compilers that skip modules already loadable
+%% there (ErlyDTL does) then leave them out of the profile's build.
+-define(DEPS, []).
 
 -spec init(rebar_state:t()) -> {ok, rebar_state:t()}.
 init(State) ->
