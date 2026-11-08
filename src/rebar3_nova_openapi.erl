@@ -241,7 +241,7 @@ component_ref(<<"#", Fragment/binary>> = Ref, File, Names) ->
     component_pointer(maps:get(File, Names), Fragment, Ref, File);
 component_ref(Ref, File, Names) ->
     case uri_string:parse(Ref) of
-        #{scheme := Scheme} ->
+        #{scheme := Scheme} when is_binary(Scheme) ->
             case byte_size(Scheme) =:= 1 orelse string:lowercase(Scheme) =:= ~"file" of
                 true -> local_path_ref(Ref, File);
                 false -> Ref
