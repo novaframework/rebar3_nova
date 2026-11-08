@@ -28,6 +28,12 @@
     openapi_same_basename_schemas_do_not_collide/1,
     openapi_component_name_collision_is_an_error/1,
     openapi_unknown_schema_gets_no_ref/1,
+    openapi_file_refs_point_at_components/1,
+    openapi_fragment_refs_stay_inside_their_component/1,
+    openapi_refs_that_are_not_loaded_schemas_are_kept/1,
+    openapi_ref_named_data_is_not_rewritten/1,
+    openapi_refs_under_keyword_named_keys_are_rewritten/1,
+    openapi_local_path_refs_warn/1,
     openapi_default_output_is_the_assets_dir/1,
     unrecognised_handlers_are_reported/1,
     audit_compiles_the_requested_environment/1,
@@ -63,6 +69,12 @@ all() ->
         openapi_same_basename_schemas_do_not_collide,
         openapi_component_name_collision_is_an_error,
         openapi_unknown_schema_gets_no_ref,
+        openapi_file_refs_point_at_components,
+        openapi_fragment_refs_stay_inside_their_component,
+        openapi_refs_that_are_not_loaded_schemas_are_kept,
+        openapi_ref_named_data_is_not_rewritten,
+        openapi_refs_under_keyword_named_keys_are_rewritten,
+        openapi_local_path_refs_warn,
         openapi_default_output_is_the_assets_dir,
         unrecognised_handlers_are_reported,
         audit_compiles_the_requested_environment,
@@ -351,6 +363,104 @@ openapi_unknown_schema_gets_no_ref(_Config) ->
     ]),
     ?assertNot(maps:is_key(~"requestBody", maps:get(~"post", maps:get(~"/x", Paths)))).
 
+%% jesse resolves a file $ref against the file holding it; in the spec the
+%% schemas live under components, so the ref has to follow them there.
+openapi_file_refs_point_at_components(Config) ->
+    SchemaDir = schema_dir(Config, "refs_app"),
+    write_schema(SchemaDir, "address.json", #{~"type" => ~"object"}),
+    write_schema(SchemaDir, "v1/user.json", #{
+        ~"type" => ~"object",
+        ~"properties" => #{
+            ~"home" => #{~"$ref" => ~"../address.json"},
+            ~"id" => #{~"$ref" => ~"./id.json#/definitions/id"},
+            ~"tags" => #{~"type" => ~"array", ~"items" => [#{~"$ref" => ~"id.json"}]}
+        }
+    }),
+    write_schema(SchemaDir, "v1/id.json", #{~"definitions" => #{~"id" => #{~"type" => ~"integer"}}}),
+    #{~"v1.user" := #{~"properties" := Props}} = load_app_schemas(Config, "refs_app"),
+    ?assertEqual(
+        #{~"$ref" => ~"#/components/schemas/address"}, maps:get(~"home", Props)
+    ),
+    ?assertEqual(
+        #{~"$ref" => ~"#/components/schemas/v1.id/definitions/id"}, maps:get(~"id", Props)
+    ),
+    ?assertMatch(
+        #{~"items" := [#{~"$ref" := ~"#/components/schemas/v1.id"}]}, maps:get(~"tags", Props)
+    ).
+
+openapi_fragment_refs_stay_inside_their_component(Config) ->
+    SchemaDir = schema_dir(Config, "fragment_app"),
+    write_schema(SchemaDir, "nested/node.json", #{
+        ~"definitions" => #{~"leaf" => #{~"type" => ~"string"}},
+        ~"properties" => #{
+            ~"leaf" => #{~"$ref" => ~"#/definitions/leaf"},
+            ~"self" => #{~"$ref" => ~"#"}
+        }
+    }),
+    #{~"nested.node" := #{~"properties" := Props}} = load_app_schemas(Config, "fragment_app"),
+    ?assertEqual(
+        #{~"$ref" => ~"#/components/schemas/nested.node/definitions/leaf"},
+        maps:get(~"leaf", Props)
+    ),
+    ?assertEqual(#{~"$ref" => ~"#/components/schemas/nested.node"}, maps:get(~"self", Props)).
+
+openapi_refs_that_are_not_loaded_schemas_are_kept(Config) ->
+    SchemaDir = schema_dir(Config, "external_app"),
+    Refs = [
+        ~"https://example.com/schemas/x.json",
+        ~"urn:example:x",
+        ~"FILE:///home/dev/schemas/x.json",
+        ~"C:/Users/dev/x.json",
+        ~"//example.com/x.json",
+        ~"missing.json",
+        ~"../../outside.json",
+        ~"#anchor"
+    ],
+    write_schema(SchemaDir, "x.json", #{~"anyOf" => [#{~"$ref" => Ref} || Ref <- Refs]}),
+    #{~"x" := #{~"anyOf" := AnyOf}} = load_app_schemas(Config, "external_app"),
+    ?assertEqual(Refs, [Ref || #{~"$ref" := Ref} <- AnyOf]).
+
+%% A property called "$ref", or an enum value holding one, is data.
+openapi_ref_named_data_is_not_rewritten(Config) ->
+    SchemaDir = schema_dir(Config, "data_app"),
+    write_schema(SchemaDir, "other.json", #{~"type" => ~"string"}),
+    Schema = #{
+        ~"properties" => #{~"$ref" => #{~"type" => ~"string"}},
+        ~"enum" => [#{~"$ref" => ~"other.json"}],
+        ~"default" => #{~"$ref" => ~"other.json"}
+    },
+    write_schema(SchemaDir, "doc.json", Schema),
+    ?assertEqual(Schema, maps:get(~"doc", load_app_schemas(Config, "data_app"))).
+
+%% Under properties, dependencies and the like the keys are names, so a
+%% property called "enum" is a schema like any other.
+openapi_refs_under_keyword_named_keys_are_rewritten(Config) ->
+    SchemaDir = schema_dir(Config, "keyword_app"),
+    write_schema(SchemaDir, "a.json", #{~"type" => ~"object"}),
+    write_schema(SchemaDir, "b.json", #{
+        ~"properties" => #{~"enum" => #{~"$ref" => ~"a.json"}},
+        ~"dependencies" => #{~"default" => #{~"$ref" => ~"a.json"}},
+        ~"$defs" => #{~"example" => #{~"$ref" => ~"a.json"}}
+    }),
+    Ref = #{~"$ref" => ~"#/components/schemas/a"},
+    ?assertMatch(
+        #{
+            ~"properties" := #{~"enum" := Ref},
+            ~"dependencies" := #{~"default" := Ref},
+            ~"$defs" := #{~"example" := Ref}
+        },
+        maps:get(~"b", load_app_schemas(Config, "keyword_app"))
+    ).
+
+openapi_local_path_refs_warn(Config) ->
+    SchemaDir = schema_dir(Config, "local_path_app"),
+    write_schema(SchemaDir, "x.json", #{
+        ~"anyOf" => [#{~"$ref" => ~"file:///x.json"}, #{~"$ref" => ~"C:/x.json"}]
+    }),
+    Output = capture(fun() -> load_app_schemas(Config, "local_path_app") end),
+    ?assertNotEqual(nomatch, string:find(Output, "file:///x.json is a local path")),
+    ?assertNotEqual(nomatch, string:find(Output, "C:/x.json is a local path")).
+
 %%====================================================================
 %% Helpers
 %%====================================================================
@@ -360,6 +470,12 @@ spec_paths(Routes) ->
 
 spec_paths(Routes, Schemas) ->
     maps:get(~"paths", rebar3_nova_openapi:build_spec("t", "1", Routes, Schemas)).
+
+schema_dir(Config, App) ->
+    filename:join([?config(priv_dir, Config), App, "priv", "schemas"]).
+
+load_app_schemas(Config, App) ->
+    rebar3_nova_openapi:load_schemas(filename:join(?config(priv_dir, Config), App)).
 
 write_schema(Dir, RelPath, Schema) ->
     Path = filename:join(Dir, RelPath),
