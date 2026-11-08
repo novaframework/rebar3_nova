@@ -62,8 +62,12 @@ command with the same behaviour.
   and no literal segment there may equal that name. `/u/{id}` beside
   `/u/{userId}/posts`, or `/u/{id}` beside `/u/id`, would shadow each other
   in Nova's router, so both are refused.
+- Two operations that become the same Nova route, such as `get /pets/{petId}`
+  and `get /pets/{pet_id}`, are refused.
 - A parameter's `in` must be `path`, `query`, `header` or `cookie`, and
-  response keys must be status codes (`200`, `2XX`) or `default`.
+  response keys must be status codes (`200`, `2XX`) or `default`. A method
+  key in the wrong case (`GET`), a non-string `operationId` and a non-string
+  tag are refused rather than ignored.
 
 ### Names
 
@@ -71,7 +75,8 @@ Every name from the spec is validated before any file is written.
 
 - One rule covers every name that becomes an Erlang identifier: tags,
   `operationId`s, security scheme names, path parameter names and names
-  derived from a method and path. Each is converted from camelCase to
+  derived from a method and path. Each must consist of ASCII letters,
+  digits, `_`, `-` and spaces, and is converted from camelCase to
   snake_case and must then match `\A[a-z][a-z0-9_]{0,63}\z` (`\z`, because
   `$` also matches before a trailing newline) and not be an Erlang reserved
   word. A name that becomes a function must also not be an auto-imported
@@ -122,8 +127,10 @@ ignore it.
 - `readOnly` properties are removed from `required`, or every create request
   would be rejected, and are kept with `not: {}`, so a request that sets one
   fails validation instead of reaching a controller that casts the whole
-  body. `rebar3 nova openapi` drops the `not: {}` again, since 3.0's
-  `readOnly` says the same.
+  body. A readOnly property beside a `$ref` is wrapped as
+  `{allOf: [ref], readOnly: true, not: {}}`, so the guard applies there too,
+  even though 3.0 ignores `$ref` siblings. `rebar3 nova openapi` drops the
+  `not: {}` again, since 3.0's `readOnly` says the same.
 - `discriminator`, `example`, `xml`, `externalDocs`, `writeOnly` and `x-*`
   are removed.
 - `$id` and `id` abort generation like any keyword outside the list: 3.0
@@ -133,15 +140,27 @@ ignore it.
   holding the ref. Refs to other component types are inlined; a cycle
   through an inlined ref aborts.
 - Each `format` jesse does not enforce produces a warning.
-- `uniqueItems` must come with `maxItems`.
+- `uniqueItems` must come with a `maxItems` of at most 1024, which bounds
+  jesse's quadratic duplicate check.
 - A `pattern` must come with a `maxLength` of at most 1024. The pattern is
-  refused when it is longer than 200 bytes, uses `\Q...\E` or `(?#...)`,
-  or repeats a group that holds an unbounded or large repetition or an
-  alternation (`(a+)+`, `(a|a)*`, `(a+){1,99}`, counting PCRE2 forms such as
-  `{1, }` and `{,5}`). It is then run against subjects of the longest length
-  `maxLength` allows, each one unit repeated and ending in a character that
-  forces a backtrack, and refused if any hits a match limit of 1,000,000.
-  `--allow-patterns` lets a refused pattern through with a warning.
+  refused when it is longer than 200 bytes, uses syntax the scan does not
+  model (`\Q...\E`, `(?#...)`, `\c`, `(*` verbs, option groups that turn on
+  extended mode), or repeats a group that holds an unbounded or large
+  repetition or an alternation (`(a+)+`, `(a|a)*`, `(a+){1,99}`, counting
+  PCRE2 forms such as `{1, }` and `{,5}`). It is then run against subjects of
+  the longest length `maxLength` allows, each one unit repeated and ending in
+  a character that forces a backtrack, with every printable ASCII character
+  and each literal run in the pattern as a unit, and refused if any hits a
+  match limit of 100,000. `--allow-patterns` lets a refused pattern through
+  with a warning.
+- The scan and the probe are heuristics, so the generated app also bounds
+  every pattern at request time. The generator prints the sys.config entry
+  `{jesse, [{re_options, [unicode, ucp, {match_limit, 100000}]}]}`, the same
+  limit the probe uses, as it prints the router line. jesse reads its
+  `re_options` from the application environment, and a pattern that hits the
+  limit returns `nomatch`, so the request is rejected: about 1 ms per value
+  against 100 ms or more without it. The limit is node-wide, which is why the
+  generator prints it rather than writing it.
 - The `maxLength` guard relies on jesse's keyword order: for a schema of up
   to 32 keywords jesse checks them in sorted order and stops at the first
   error, so `maxLength` runs before `pattern`. If nova_json_schemas ever
