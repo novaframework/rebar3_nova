@@ -48,7 +48,7 @@ Then just call your plugin directly in an existing application:
 | `--kura` | `kura` + `kura_postgres`, a repo module, the `{kura, compile}` migration hook, a `{kura, [{repos, ...}]}` config and a `docker-compose.yml` with PostgreSQL. Migrations are a release step, not run at boot (below). |
 | `--pgo` | `pgo` with a `{pgo, [{pools, ...}]}` config (not together with `--kura`) |
 | `--arizona` | `arizona_nova`, a live page at `/` with a layout, and the `arizona_nova` routes and middleware chain in the configs. Arizona needs OTP 29. |
-| `--otel` | OpenTelemetry deps and `opentelemetry_nova:setup()` at start |
+| `--otel` | `opentelemetry_nova` 0.5 with the OpenTelemetry SDK, metrics SDK and OTLP exporter, `otel_nova_stream_h` first in `stream_handlers`, `otel_nova_plugin` as the first `pre_request` plugin and `opentelemetry_nova:setup()` at start. Dev prints spans to stdout; prod sends them over OTLP to `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318`). |
 | `--lfe` | LFE sources instead of Erlang |
 | `--ci` | A GitHub Actions workflow |
 | `--docker` | A multi-stage `Dockerfile` (OTP 29 builder, Debian trixie runtime) |

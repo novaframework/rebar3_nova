@@ -195,8 +195,11 @@ rebar_deps(Flags) ->
         case maps:get(otel, Flags) of
             true ->
                 [
-                    ",\n    {opentelemetry, \"~> 1.7\"},\n    {opentelemetry_api, \"~> 1.5\"},\n"
-                    "    {opentelemetry_exporter, \"~> 1.11\"},\n    {opentelemetry_nova, \"~> 0.2\"}"
+                    ",\n    {opentelemetry, \"~> 1.7\"},\n",
+                    "    {opentelemetry_api, \"~> 1.5\"},\n",
+                    "    {opentelemetry_experimental, \"~> 0.6\"},\n",
+                    "    {opentelemetry_exporter, \"~> 1.11\"},\n",
+                    "    {opentelemetry_nova, \"~> 0.5\"}"
                 ];
             false ->
                 []
@@ -393,7 +396,10 @@ app_src_applications(Flags) ->
         case maps:get(otel, Flags) of
             true ->
                 [
-                    ",\n        opentelemetry_exporter,\n        opentelemetry,\n        opentelemetry_nova"
+                    ",\n        opentelemetry_exporter,\n",
+                    "        opentelemetry_experimental,\n",
+                    "        opentelemetry,\n",
+                    "        opentelemetry_nova"
                 ];
             false ->
                 []
@@ -404,8 +410,13 @@ app_src_applications(Flags) ->
 %% app.erl / app.lfe
 %%======================================================================
 
-generate_app(Name, #{lfe := true}) ->
+generate_app(Name, #{lfe := true} = Flags) ->
     Path = filename:join([Name, "src", Name ++ "_app.lfe"]),
+    Otel =
+        case maps:get(otel, Flags) of
+            true -> ["  (opentelemetry_nova:setup)\n"];
+            false -> []
+        end,
     Content = [
         "(defmodule ",
         Name,
@@ -420,6 +431,7 @@ generate_app(Name, #{lfe := true}) ->
         "  (log-info \"Starting ",
         Name,
         " application ...\")\n",
+        Otel,
         "  (",
         Name,
         ".sup:start_link))\n\n",
@@ -730,6 +742,7 @@ sys_config_nova(Name, Env, Flags) ->
         "},\n",
         "     {cowboy_configuration, #{\n",
         "         port => 8080",
+        sys_config_stream_handlers(Flags),
         sys_config_middlewares(Flags),
         "\n",
         "     }},\n",
@@ -737,10 +750,33 @@ sys_config_nova(Name, Env, Flags) ->
         Name,
         "},\n",
         "     {plugins, [\n",
+        sys_config_otel_plugin(Flags),
         "         {pre_request, nova_request_plugin, #{decode_json_body => true}}\n",
         "     ]}\n",
         " ]}"
     ].
+
+sys_config_stream_handlers(#{otel := true}) ->
+    [
+        ",\n",
+        "         %% otel_nova_stream_h must come first: it starts and ends the server span.\n",
+        "         stream_handlers => [\n",
+        "             otel_nova_stream_h,\n",
+        "             nova_stream_h,\n",
+        "             cowboy_compress_h,\n",
+        "             cowboy_stream_h\n",
+        "         ]"
+    ];
+sys_config_stream_handlers(_Flags) ->
+    [].
+
+sys_config_otel_plugin(#{otel := true}) ->
+    [
+        "         %% First, so later plugins and controllers run inside the server span.\n",
+        "         {pre_request, otel_nova_plugin, #{}},\n"
+    ];
+sys_config_otel_plugin(_Flags) ->
+    [].
 
 sys_config_middlewares(#{arizona := true}) ->
     [
@@ -882,7 +918,8 @@ sys_config_otel(prod, #{otel := true}) ->
     [
         " {opentelemetry, [\n",
         "     {span_processor, batch},\n",
-        "     {traces_exporter, {opentelemetry_exporter, #{endpoints => [\"${OTEL_ENDPOINT}\"]}}}\n",
+        "     %% OTLP over HTTP to OTEL_EXPORTER_OTLP_ENDPOINT, default http://localhost:4318\n",
+        "     {traces_exporter, otlp}\n",
         " ]}"
     ];
 sys_config_otel(_Env, _Flags) ->
