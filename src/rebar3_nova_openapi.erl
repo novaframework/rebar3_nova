@@ -208,8 +208,8 @@ Points a schema's `$ref`s at components. jesse resolves a file ref such as
 schema sits in `components/schemas`, so each one that names a loaded
 schema becomes `#/components/schemas/<name>`. A fragment-only ref
 (`#/definitions/x`) is rooted at the schema's own component. Absolute
-URIs are left alone; a file ref that matches no loaded schema is left
-alone with a warning.
+URIs are left alone. A `file:` URI, or a file ref that matches no loaded
+schema, is left alone with a warning, since the spec may be published.
 """.
 -spec component_refs(json:decode_value(), file:filename(), #{file:filename() => binary()}) ->
     json:decode_value().
@@ -238,8 +238,11 @@ component_ref(<<"#", Fragment/binary>> = Ref, File, Names) ->
     component_pointer(maps:get(File, Names), Fragment, Ref, File);
 component_ref(Ref, File, Names) ->
     case uri_string:parse(Ref) of
-        #{scheme := _} ->
-            Ref;
+        #{scheme := Scheme} ->
+            case string:lowercase(Scheme) of
+                ~"file" -> unresolved_ref(Ref, File);
+                _ -> Ref
+            end;
         #{host := _} ->
             Ref;
         #{path := Path} = Parsed when Path =/= ~"" ->

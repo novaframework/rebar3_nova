@@ -405,6 +405,7 @@ openapi_refs_that_are_not_loaded_schemas_are_kept(Config) ->
     Refs = [
         ~"https://example.com/schemas/x.json",
         ~"urn:example:x",
+        ~"FILE:///home/dev/schemas/x.json",
         ~"//example.com/x.json",
         ~"missing.json",
         ~"../../outside.json",
