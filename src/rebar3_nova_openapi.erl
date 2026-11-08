@@ -31,7 +31,7 @@ init(State) ->
         {example, "rebar3 nova openapi --prefix /api"},
         {opts, [
             {output, $o, "output", string,
-                "Output file path (default: priv/assets/openapi.json, served under /assets)"},
+                "Output file path (default: priv/assets/openapi.json, which rebar3 nova new apps serve under /assets)"},
             {title, $t, "title", string, "API title (default: app name)"},
             {api_version, $v, "api-version", {string, "0.1.0"}, "API version"},
             {prefix, $p, "prefix", string,
@@ -82,8 +82,9 @@ format_error(Reason) ->
     io_lib:format("~p", [Reason]).
 
 -doc """
-Where the spec goes without `--output`: `priv/assets`, which the scaffold
-serves under `/assets`. Pass `--output` to keep it private.
+Where the spec goes without `--output`: `priv/assets`, which apps made
+with `rebar3 nova new` serve under `/assets`. Pass `--output` to keep it
+private.
 """.
 -spec default_output(file:filename_all()) -> file:filename_all().
 default_output(AppDir) ->
