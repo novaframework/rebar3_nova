@@ -21,7 +21,7 @@ rebar3 nova middleware       # Show plugin/middleware chains
 rebar3 nova config           # Show Nova configuration
 rebar3 nova audit            # Security audit of routes
 rebar3 nova doctor           # Diagnose project health (toolchain, config, routes, build, ...)
-rebar3 nova release          # Build release (regenerates OpenAPI if schemas exist)
+rebar3 nova release          # Build release (rebar3 as <profile> release)
 ```
 
 ## Key modules
