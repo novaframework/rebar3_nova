@@ -208,8 +208,9 @@ Points a schema's `$ref`s at components. jesse resolves a file ref such as
 schema sits in `components/schemas`, so each one that names a loaded
 schema becomes `#/components/schemas/<name>`. A fragment-only ref
 (`#/definitions/x`) is rooted at the schema's own component. Absolute
-URIs are left alone. A `file:` URI, or a file ref that matches no loaded
-schema, is left alone with a warning, since the spec may be published.
+URIs are left alone. A local path (a `file:` URI or a drive path), or a
+file ref that matches no loaded schema, is left alone with a warning, since
+the spec may be published.
 """.
 -spec component_refs(json:decode_value(), file:filename(), #{file:filename() => binary()}) ->
     json:decode_value().
@@ -224,7 +225,9 @@ component_refs(~"$ref", Ref, File, Names) when is_binary(Ref) ->
     component_ref(Ref, File, Names);
 component_refs(Key, Schemas, File, Names) when
     is_map(Schemas),
-    (Key =:= ~"properties" orelse Key =:= ~"patternProperties" orelse Key =:= ~"definitions")
+    (Key =:= ~"properties" orelse Key =:= ~"patternProperties" orelse
+        Key =:= ~"definitions" orelse Key =:= ~"$defs" orelse
+        Key =:= ~"dependencies" orelse Key =:= ~"dependentSchemas")
 ->
     #{Name => component_refs(Schema, File, Names) || Name := Schema <- Schemas};
 component_refs(Key, Value, _File, _Names) when
@@ -239,9 +242,9 @@ component_ref(<<"#", Fragment/binary>> = Ref, File, Names) ->
 component_ref(Ref, File, Names) ->
     case uri_string:parse(Ref) of
         #{scheme := Scheme} ->
-            case string:lowercase(Scheme) of
-                ~"file" -> unresolved_ref(Ref, File);
-                _ -> Ref
+            case byte_size(Scheme) =:= 1 orelse string:lowercase(Scheme) =:= ~"file" of
+                true -> local_path_ref(Ref, File);
+                false -> Ref
             end;
         #{host := _} ->
             Ref;
@@ -263,6 +266,12 @@ component_pointer(Name, Fragment, Ref, File) ->
         <<"/", _/binary>> -> <<"#/components/schemas/", Name/binary, Fragment/binary>>;
         _ -> unresolved_ref(Ref, File)
     end.
+
+%% A `file:` URI or a Windows drive path (`C:/...`, which parses as a
+%% one-letter scheme).
+local_path_ref(Ref, File) ->
+    rebar_api:warn("Schema ~ts: $ref ~ts is a local path; it is kept as written", [File, Ref]),
+    Ref.
 
 unresolved_ref(Ref, File) ->
     rebar_api:warn("Schema ~ts: $ref ~ts does not resolve to a schema under priv/schemas", [

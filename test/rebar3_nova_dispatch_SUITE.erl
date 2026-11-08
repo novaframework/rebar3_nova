@@ -32,6 +32,8 @@
     openapi_fragment_refs_stay_inside_their_component/1,
     openapi_refs_that_are_not_loaded_schemas_are_kept/1,
     openapi_ref_named_data_is_not_rewritten/1,
+    openapi_refs_under_keyword_named_keys_are_rewritten/1,
+    openapi_local_path_refs_warn/1,
     openapi_default_output_is_the_assets_dir/1,
     unrecognised_handlers_are_reported/1,
     audit_compiles_the_requested_environment/1,
@@ -71,6 +73,8 @@ all() ->
         openapi_fragment_refs_stay_inside_their_component,
         openapi_refs_that_are_not_loaded_schemas_are_kept,
         openapi_ref_named_data_is_not_rewritten,
+        openapi_refs_under_keyword_named_keys_are_rewritten,
+        openapi_local_path_refs_warn,
         openapi_default_output_is_the_assets_dir,
         unrecognised_handlers_are_reported,
         audit_compiles_the_requested_environment,
@@ -406,6 +410,7 @@ openapi_refs_that_are_not_loaded_schemas_are_kept(Config) ->
         ~"https://example.com/schemas/x.json",
         ~"urn:example:x",
         ~"FILE:///home/dev/schemas/x.json",
+        ~"C:/Users/dev/x.json",
         ~"//example.com/x.json",
         ~"missing.json",
         ~"../../outside.json",
@@ -426,6 +431,35 @@ openapi_ref_named_data_is_not_rewritten(Config) ->
     },
     write_schema(SchemaDir, "doc.json", Schema),
     ?assertEqual(Schema, maps:get(~"doc", load_app_schemas(Config, "data_app"))).
+
+%% Under properties, dependencies and the like the keys are names, so a
+%% property called "enum" is a schema like any other.
+openapi_refs_under_keyword_named_keys_are_rewritten(Config) ->
+    SchemaDir = schema_dir(Config, "keyword_app"),
+    write_schema(SchemaDir, "a.json", #{~"type" => ~"object"}),
+    write_schema(SchemaDir, "b.json", #{
+        ~"properties" => #{~"enum" => #{~"$ref" => ~"a.json"}},
+        ~"dependencies" => #{~"default" => #{~"$ref" => ~"a.json"}},
+        ~"$defs" => #{~"example" => #{~"$ref" => ~"a.json"}}
+    }),
+    Ref = #{~"$ref" => ~"#/components/schemas/a"},
+    ?assertMatch(
+        #{
+            ~"properties" := #{~"enum" := Ref},
+            ~"dependencies" := #{~"default" := Ref},
+            ~"$defs" := #{~"example" := Ref}
+        },
+        maps:get(~"b", load_app_schemas(Config, "keyword_app"))
+    ).
+
+openapi_local_path_refs_warn(Config) ->
+    SchemaDir = schema_dir(Config, "local_path_app"),
+    write_schema(SchemaDir, "x.json", #{
+        ~"anyOf" => [#{~"$ref" => ~"file:///x.json"}, #{~"$ref" => ~"C:/x.json"}]
+    }),
+    Output = capture(fun() -> load_app_schemas(Config, "local_path_app") end),
+    ?assertNotEqual(nomatch, string:find(Output, "file:///x.json is a local path")),
+    ?assertNotEqual(nomatch, string:find(Output, "C:/x.json is a local path")).
 
 %%====================================================================
 %% Helpers
