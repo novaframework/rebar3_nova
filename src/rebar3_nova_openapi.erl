@@ -136,10 +136,12 @@ load_schemas(AppDir) ->
     Files = filelib:wildcard("**/*.json", unicode:characters_to_list(SchemaDir)),
     case component_names(Files) of
         {ok, Named} ->
-            maps:from_list([
-                {Name, Schema}
+            Loaded = [
+                {Name, File, Schema}
              || {Name, File} <- Named, {ok, Schema} <- [load_schema(SchemaDir, File)]
-            ]);
+            ],
+            Names = #{File => Name || {Name, File, _} <- Loaded},
+            #{Name => component_refs(Schema, File, Names) || {Name, File, Schema} <- Loaded};
         {error, {collision, Name, Paths}} ->
             rebar_api:abort("Schemas ~p all map to the component name ~ts; rename one", [
                 Paths, Name
@@ -198,6 +200,81 @@ component_schema(Schema) ->
         #{~"id" := Id} when is_binary(Id) -> maps:remove(~"id", Stripped);
         _ -> Stripped
     end.
+
+-doc """
+Points a schema's `$ref`s at components. jesse resolves a file ref such as
+`address.json` against the file holding it, which means nothing once the
+schema sits in `components/schemas`, so each one that names a loaded
+schema becomes `#/components/schemas/<name>`. A fragment-only ref
+(`#/definitions/x`) is rooted at the schema's own component. Absolute
+URIs are left alone; a file ref that matches no loaded schema is left
+alone with a warning.
+""".
+-spec component_refs(json:decode_value(), file:filename(), #{file:filename() => binary()}) ->
+    json:decode_value().
+component_refs(Schema, File, Names) when is_map(Schema) ->
+    #{Key => component_refs(Key, Value, File, Names) || Key := Value <- Schema};
+component_refs(List, File, Names) when is_list(List) ->
+    [component_refs(Value, File, Names) || Value <- List];
+component_refs(Value, _File, _Names) ->
+    Value.
+
+component_refs(~"$ref", Ref, File, Names) when is_binary(Ref) ->
+    component_ref(Ref, File, Names);
+component_refs(Key, Schemas, File, Names) when
+    is_map(Schemas),
+    (Key =:= ~"properties" orelse Key =:= ~"patternProperties" orelse Key =:= ~"definitions")
+->
+    #{Name => component_refs(Schema, File, Names) || Name := Schema <- Schemas};
+component_refs(Key, Value, _File, _Names) when
+    Key =:= ~"enum"; Key =:= ~"const"; Key =:= ~"default"; Key =:= ~"example"; Key =:= ~"examples"
+->
+    Value;
+component_refs(_Key, Value, File, Names) ->
+    component_refs(Value, File, Names).
+
+component_ref(<<"#", Fragment/binary>> = Ref, File, Names) ->
+    component_pointer(maps:get(File, Names), Fragment, Ref, File);
+component_ref(Ref, File, Names) ->
+    case uri_string:parse(Ref) of
+        #{scheme := _} ->
+            Ref;
+        #{host := _} ->
+            Ref;
+        #{path := Path} = Parsed when Path =/= ~"" ->
+            Target = resolve_ref(filename:dirname(File), unicode:characters_to_list(Path)),
+            case Names of
+                #{Target := Name} ->
+                    component_pointer(Name, maps:get(fragment, Parsed, ~""), Ref, File);
+                #{} ->
+                    unresolved_ref(Ref, File)
+            end;
+        _ ->
+            unresolved_ref(Ref, File)
+    end.
+
+component_pointer(Name, Fragment, Ref, File) ->
+    case Fragment of
+        ~"" -> <<"#/components/schemas/", Name/binary>>;
+        <<"/", _/binary>> -> <<"#/components/schemas/", Name/binary, Fragment/binary>>;
+        _ -> unresolved_ref(Ref, File)
+    end.
+
+unresolved_ref(Ref, File) ->
+    rebar_api:warn("Schema ~ts: $ref ~ts does not resolve to a schema under priv/schemas", [
+        File, Ref
+    ]),
+    Ref.
+
+resolve_ref(Dir, Path) ->
+    normalise_path(filename:split(filename:join(Dir, Path)), []).
+
+normalise_path([], []) -> outside;
+normalise_path([], Reversed) -> filename:join(lists:reverse(Reversed));
+normalise_path(["." | Rest], Reversed) -> normalise_path(Rest, Reversed);
+normalise_path([".." | _], []) -> outside;
+normalise_path([".." | Rest], [_ | Reversed]) -> normalise_path(Rest, Reversed);
+normalise_path([Segment | Rest], Reversed) -> normalise_path(Rest, [Segment | Reversed]).
 
 %% ===================================================================
 %% OpenAPI spec building
