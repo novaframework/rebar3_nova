@@ -53,10 +53,11 @@ command with the same behaviour.
 - The main application only, the one nova_json_schemas loads schemas from.
 - Refused: remote and `file://` refs, and request bodies on `GET`, `HEAD`
   and `DELETE`, which `nova_request_plugin` does not decode.
-- Each path segment must match `\A([A-Za-z0-9._~-]+|\{[a-z][a-z0-9_]*\})\z`
+- Each path segment must match `\A([A-Za-z0-9._~-]+|\{[A-Za-z][A-Za-z0-9_]*\})\z`
   and not be `.` or `..`, which rules out empty segments, segments that bind
   only part of themselves (`{a}.{b}`) and Nova's own `:name` and `[...]`
-  syntax. `{p}` then becomes `:p`.
+  syntax. A parameter name follows the identifier rule below, so `{postId}`
+  becomes `:post_id`.
 
 ### Names
 
@@ -103,7 +104,9 @@ The generator never edits the app's router. It prints the line that appends
 keywords. A keyword outside the list aborts generation, because jesse would
 ignore it.
 
-- `nullable: true` adds `"null"` to `type`, and to `enum` when there is one.
+- `nullable: true` adds `"null"` to `type` when `type` is set, as OpenAPI
+  3.0.3 defines it. It does not change `enum`, so an `enum` without `null`
+  still rejects null.
 - Boolean `exclusiveMinimum` and `exclusiveMaximum` become the numeric form.
 - `readOnly` properties are removed from `required`, or every create request
   would be rejected.
