@@ -21,7 +21,7 @@ rebar3 nova middleware       # Show plugin/middleware chains
 rebar3 nova config           # Show Nova configuration
 rebar3 nova audit            # Security audit of routes
 rebar3 nova doctor           # Diagnose project health (toolchain, config, routes, build, ...)
-rebar3 nova release          # Build release (regenerates OpenAPI if schemas exist)
+rebar3 nova release          # Build release (rebar3 as <profile> release)
 ```
 
 ## Key modules
@@ -50,7 +50,7 @@ rebar3 nova release          # Build release (regenerates OpenAPI if schemas exi
 - `priv/templates/nova_websocket.template` — WebSocket module
 
 ## Architecture
-Uses rebar3 provider pattern. Each command is a separate provider module in the `nova` namespace. All depend on `{default, compile}`.
+Uses rebar3 provider pattern. Each command is a separate provider module in the `nova` namespace. All depend on `{default, compile}` except `release`, which runs `rebar3 as <profile> release` without compiling the default profile first: a default compile leaves `_build/default` on the code path, and ErlyDTL then skips templates it can already load, so they miss the release.
 
 ## Git workflow
 Default branch is `master`. NEVER push directly — always create a PR.

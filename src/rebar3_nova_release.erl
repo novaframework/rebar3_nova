@@ -6,7 +6,10 @@
 -export([as_args/1]).
 
 -define(PROVIDER, release).
--define(DEPS, [{default, compile}]).
+%% No compile dependency: compiling the default profile first puts its ebin
+%% dirs on the code path, and compilers that skip modules already loadable
+%% there (ErlyDTL does) then leave them out of the profile's build.
+-define(DEPS, []).
 
 -spec init(rebar_state:t()) -> {ok, rebar_state:t()}.
 init(State) ->
@@ -21,25 +24,14 @@ init(State) ->
             {profile, $p, "profile", {string, "prod"}, "Release profile to use"}
         ]},
         {short_desc, "Build a Nova release"},
-        {desc, "Regenerates OpenAPI spec if schemas exist, then builds a release"}
+        {desc, "Builds a release with `rebar3 as <profile> release`"}
     ]),
     {ok, rebar_state:add_provider(State, Provider)}.
 
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
-    AppDir = rebar3_nova_utils:get_app_dir(State),
     {Args, _} = rebar_state:command_parsed_args(State),
     Profile = proplists:get_value(profile, Args, "prod"),
-
-    SchemaDir = filename:join([AppDir, "priv", "schemas"]),
-    case filelib:is_dir(SchemaDir) of
-        true ->
-            rebar_api:info("Regenerating OpenAPI spec", []),
-            rebar3_nova_openapi:do(State);
-        false ->
-            ok
-    end,
-
     rebar_api:info("Building release with profile '~s'", [Profile]),
     case rebar_prv_as:do(rebar_state:command_args(State, as_args(Profile))) of
         {ok, State1} ->

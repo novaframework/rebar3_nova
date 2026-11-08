@@ -360,11 +360,10 @@ $ rebar3 nova doctor --strict
 
 ### `nova release` — Build a release
 
-Runs `rebar3 as <profile> release`. If `priv/schemas/` exists, regenerates the OpenAPI spec (with the `openapi` defaults) before building.
+Runs `rebar3 as <profile> release`. It does not touch the OpenAPI spec: run `rebar3 nova openapi` with your options (`--prefix /api` to document only the API, `--output` to write outside the public `priv/assets`) as a separate command before releasing if the spec should be refreshed. Do not chain them with `rebar3 do`: the default-profile compile `openapi` needs would leave ErlyDTL templates out of the release.
 
 ```
 $ rebar3 nova release
-===> Regenerating OpenAPI spec
 ===> Building release with profile 'prod'
 ===> Release built successfully with profile 'prod'
 
