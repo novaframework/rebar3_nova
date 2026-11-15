@@ -30,8 +30,21 @@
     config_missing_json_lib_names_the_default/1,
     config_session_manager_default_is_ok/1,
     config_session_backend_warns/1,
-    config_sessions_disabled/1
+    config_sessions_disabled/1,
+    environment_unset_warns_where_it_is_read_as_prod/1,
+    settings_are_not_checked_for_a_nova_without_them/1,
+    settings_valid_values_are_ok/1,
+    settings_refused_value_is_an_error/1,
+    settings_never_show_a_secret/1,
+    settings_stateless_token_needs_a_secret/1,
+    settings_removed_setting_is_an_error/1,
+    settings_under_the_bootstrap_app_warn/1,
+    settings_of_the_nova_under_test/1,
+    routes_refused_setting_is_named/1
 ]).
+
+-define(SETTINGS, rebar3_nova_test_settings).
+-define(SECRET, ~"a secret that only the test suites use 0123456789").
 
 all() ->
     [
@@ -57,6 +70,16 @@ all() ->
         config_session_manager_default_is_ok,
         config_session_backend_warns,
         config_sessions_disabled,
+        environment_unset_warns_where_it_is_read_as_prod,
+        settings_are_not_checked_for_a_nova_without_them,
+        settings_valid_values_are_ok,
+        settings_refused_value_is_an_error,
+        settings_never_show_a_secret,
+        settings_stateless_token_needs_a_secret,
+        settings_removed_setting_is_an_error,
+        settings_under_the_bootstrap_app_warn,
+        settings_of_the_nova_under_test,
+        routes_refused_setting_is_named,
         security_env_needs_an_exact_gitignore_line,
         security_flags_a_literal_cookie,
         security_asks_git_about_env
@@ -188,6 +211,105 @@ config_sessions_disabled(_Config) ->
     Config = [{nova, [{bootstrap_application, blog}]}, {blog, [{use_sessions, false}]}],
     ?assertEqual([], warnings(Config)),
     ?assertMatch([_], [M || "sessions disabled" ++ _ = M <- ok_messages(Config)]).
+
+%%======================================================================
+%% environment_findings/2, settings_findings/3, route_findings/1
+%%======================================================================
+
+environment_unset_warns_where_it_is_read_as_prod(_Config) ->
+    Unset = [{nova, [{bootstrap_application, blog}]}],
+    Set = [{nova, [{environment, dev}]}],
+    ?assertMatch([{warn, _, _}], rebar3_nova_doctor:environment_findings(Unset, prod)),
+    ?assertEqual([], rebar3_nova_doctor:environment_findings(Unset, dev)),
+    ?assertEqual([], rebar3_nova_doctor:environment_findings(Set, prod)).
+
+settings_are_not_checked_for_a_nova_without_them(_Config) ->
+    Config = [{nova, [{trusted_origins, nonsense}, {csrf_secret, ?SECRET}]}],
+    ?assertEqual([], rebar3_nova_doctor:settings_findings(Config, blog, undefined)).
+
+settings_valid_values_are_ok(_Config) ->
+    Config = [{nova, [{trusted_origins, same_origin}, {csrf_token, session}]}],
+    Findings = settings(Config),
+    ?assertEqual([], [F || F <- Findings, element(1, F) =/= ok]),
+    Messages = [lists:flatten(Msg) || {ok, Msg} <- Findings],
+    ?assert(lists:member("trusted_origins = same_origin", Messages)),
+    ?assert(lists:member("csrf_token = session", Messages)),
+    ?assert(lists:member("secret_key_base is not set", Messages)).
+
+settings_refused_value_is_an_error(_Config) ->
+    [{error, Msg, Hint}] = problems([{nova, [{non_canonical_paths, allow}]}]),
+    ?assertNotEqual(nomatch, string:find(lists:flatten(Msg), "non_canonical_paths = allow")),
+    ?assertEqual(~"non_canonical_paths must be something else", iolist_to_binary(Hint)).
+
+settings_never_show_a_secret(_Config) ->
+    Set = settings([{nova, [{secret_key_base, ?SECRET}]}]),
+    ?assert(lists:member("secret_key_base is set", [lists:flatten(Msg) || {ok, Msg} <- Set])),
+    Refused = settings([{nova, [{secret_key_base, ~"too short"}, {csrf_secret, ?SECRET}]}]),
+    ?assertMatch([_, _], [F || F <- Refused, element(1, F) =:= error]),
+    Text = rebar3_nova_utils:to_binary(io_lib:format("~tp~tp", [Set, Refused])),
+    ?assertEqual(nomatch, binary:match(Text, ?SECRET)),
+    ?assertEqual(nomatch, binary:match(Text, ~"too short")).
+
+settings_stateless_token_needs_a_secret(_Config) ->
+    ?assertMatch(
+        [{error, "csrf_token is stateless and secret_key_base is not set", _}],
+        problems([{nova, [{csrf_token, stateless}]}])
+    ),
+    ?assertEqual([], problems([{nova, [{csrf_token, stateless}, {secret_key_base, ?SECRET}]}])).
+
+settings_removed_setting_is_an_error(_Config) ->
+    [{error, Msg, Hint}] = problems([{nova, [{allowed_origins, any}]}]),
+    ?assertNotEqual(nomatch, string:find(lists:flatten(Msg), "allowed_origins")),
+    ?assertNotEqual(nomatch, string:find(lists:flatten(Hint), "trusted_origins")).
+
+settings_under_the_bootstrap_app_warn(_Config) ->
+    Config = [{nova, [{bootstrap_application, blog}]}, {blog, [{trusted_origins, any}]}],
+    [{warn, Msg, Hint}] = problems(Config),
+    ?assertEqual("trusted_origins is set under blog", lists:flatten(Msg)),
+    ?assertNotEqual(nomatch, string:find(lists:flatten(Hint), "{nova, [...]}")).
+
+%% The settings module of the Nova on the code path, where it has one,
+%% takes what the stand-in of this suite takes.
+settings_of_the_nova_under_test(_Config) ->
+    case rebar3_nova_utils:settings_module() of
+        undefined ->
+            _ = code:ensure_loaded(nova_settings),
+            ?assertNot(erlang:function_exported(nova_settings, checked, 2));
+        Settings ->
+            Valid = [{nova, [{trusted_origins, same_origin}, {non_canonical_paths, resolve}]}],
+            ?assertEqual(
+                [],
+                [
+                    F
+                 || F <- rebar3_nova_doctor:settings_findings(Valid, blog, Settings),
+                    element(1, F) =/= ok
+                ]
+            ),
+            Refused = [{nova, [{secret_key_base, ~"${SECRET_KEY_BASE}"}]}],
+            ?assertMatch(
+                [{error, "secret_key_base is set to a value Nova does not start with", _}],
+                [
+                    F
+                 || F <- rebar3_nova_doctor:settings_findings(Refused, blog, Settings),
+                    element(1, F) =/= ok
+                ]
+            )
+    end.
+
+routes_refused_setting_is_named(_Config) ->
+    [{error, Msg, _Hint}] = route_findings(
+        {error, {invalid_setting, security_reads_body, sometimes}}
+    ),
+    ?assertNotEqual(nomatch, string:find(lists:flatten(Msg), "security_reads_body")).
+
+route_findings(Result) ->
+    rebar3_nova_doctor:route_findings(Result).
+
+settings(Config) ->
+    rebar3_nova_doctor:settings_findings(Config, blog, ?SETTINGS).
+
+problems(Config) ->
+    [F || F <- settings(Config), element(1, F) =/= ok].
 
 findings(Config, JsonStatus) ->
     rebar3_nova_doctor:config_findings(Config, blog, JsonStatus).

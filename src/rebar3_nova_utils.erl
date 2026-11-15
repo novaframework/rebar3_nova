@@ -11,9 +11,14 @@
     load_sys_config/1,
     default_json_lib/0,
     default_json_lib/1,
+    default_environment/0,
+    settings_module/0,
+    checked_settings/0,
     sys_config_path/1,
     compile_routes/2,
     compile_app_routes/1,
+    route_table/1,
+    invalid_setting_message/2,
     router_module/1,
     to_binary/1
 ]).
@@ -96,17 +101,38 @@ compile_routes(State, App) ->
 -doc """
 Compile the routes of `Apps`, entries as in `nova_apps`, with the nova on
 the code path, into a table of their own so earlier compiles do not merge
-in. Aborts when that nova predates `nova_routing_trie`.
+in. Aborts when that nova predates `nova_routing_trie`, or refuses a
+setting of the routes.
 """.
 -spec compile_app_routes([atom() | {atom(), map()}]) -> nova_routing_trie:trie().
 compile_app_routes(Apps) ->
+    case route_table(Apps) of
+        {ok, Dispatch} ->
+            Dispatch;
+        {error, {invalid_setting, Setting, Reason}} ->
+            rebar_api:abort("~ts", [invalid_setting_message(Setting, Reason)])
+    end.
+
+-doc """
+As `compile_app_routes/1`, with a setting the nova on the code path refuses
+returned and not aborted on: a later Nova than 0.18 checks the settings of a
+route group and of the `nova` environment when it compiles routes.
+""".
+-spec route_table([atom() | {atom(), map()}]) ->
+    {ok, nova_routing_trie:trie()} | {error, {invalid_setting, atom(), term()}}.
+route_table(Apps) ->
     _ = [application:load(app_name(App)) || App <- Apps],
     _ = code:ensure_loaded(nova_routing_trie),
     case erlang:function_exported(nova_routing_trie, routes, 1) of
         true ->
             Key = {nova_dispatch, rebar3_nova, erlang:unique_integer([positive])},
             try
-                nova_router:compile(Apps, Key)
+                {ok, nova_router:compile(Apps, Key)}
+            catch
+                throw:{error, {invalid_setting, Setting, Reason}} when is_atom(Setting) ->
+                    {error, {invalid_setting, Setting, Reason}};
+                error:{invalid_setting, Setting, Reason} when is_atom(Setting) ->
+                    {error, {invalid_setting, Setting, Reason}}
             after
                 nova_router:delete_dispatch(Key)
             end;
@@ -117,6 +143,20 @@ compile_app_routes(Apps) ->
                 []
             )
     end.
+
+-doc "What to print for a setting Nova refused while it compiled routes.".
+-spec invalid_setting_message(atom(), term()) -> io_lib:chars().
+invalid_setting_message(Setting, {replaced_by, Replacement}) ->
+    io_lib:format(
+        "Nova does not compile the routes: ~p is no longer a setting, use ~p",
+        [Setting, Replacement]
+    );
+invalid_setting_message(Setting, {requires, Other}) ->
+    io_lib:format("Nova does not compile the routes: ~p needs ~p", [Setting, Other]);
+invalid_setting_message(Setting, {required_by, Other}) ->
+    io_lib:format("Nova does not compile the routes: ~p needs ~p", [Other, Setting]);
+invalid_setting_message(Setting, Value) ->
+    io_lib:format("Nova does not compile the routes: ~p cannot be ~p", [Setting, Value]).
 
 app_name({App, _Options}) -> App;
 app_name(App) -> App.
@@ -175,3 +215,49 @@ default_json_lib(NovaApplications) ->
         true -> thoas;
         false -> json
     end.
+
+-doc """
+The environment the project's Nova runs in when `environment` is not set:
+`dev` up to Nova 0.18, `prod` for a later one.
+""".
+-spec default_environment() -> atom().
+default_environment() ->
+    Configured = application:get_env(nova, environment),
+    ok = application:unset_env(nova, environment),
+    try nova:get_environment() of
+        Default when is_atom(Default) -> Default
+    after
+        case Configured of
+            {ok, Environment} -> application:set_env(nova, environment, Environment);
+            undefined -> ok
+        end
+    end.
+
+-doc """
+`nova_settings` when the project's Nova has it, which is a Nova that checks
+the settings of `checked_settings/0` when it starts. `undefined` for Nova
+0.18 and earlier, which read none of them.
+""".
+-spec settings_module() -> module() | undefined.
+settings_module() ->
+    _ = code:ensure_loaded(nova_settings),
+    case
+        erlang:function_exported(nova_settings, checked, 2) andalso
+            erlang:function_exported(nova_settings, expected, 1) andalso
+            erlang:function_exported(nova_settings, removed, 0)
+    of
+        true -> nova_settings;
+        false -> undefined
+    end.
+
+-doc "The settings a Nova with `settings_module/0` checks at boot, with their defaults.".
+-spec checked_settings() -> [{atom(), term()}].
+checked_settings() ->
+    [
+        {non_canonical_paths, reject},
+        {trusted_origins, same_host},
+        {csrf_token, undefined},
+        {secret_key_base, undefined},
+        {max_sessions, 1000000},
+        {plugins_before_security, []}
+    ].
