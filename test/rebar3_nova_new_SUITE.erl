@@ -37,7 +37,8 @@
     migrations_are_a_release_step/1,
     epmd_address_is_documented/1,
     prod_config_reads_the_secret_from_the_environment/1,
-    docker_run_names_the_secret/1
+    docker_run_names_the_secret/1,
+    plugin_template_has_the_callbacks_nova_calls/1
 ]).
 
 all() ->
@@ -74,7 +75,8 @@ all() ->
         migrations_are_a_release_step,
         epmd_address_is_documented,
         prod_config_reads_the_secret_from_the_environment,
-        docker_run_names_the_secret
+        docker_run_names_the_secret,
+        plugin_template_has_the_callbacks_nova_calls
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -741,6 +743,30 @@ docker_run_names_the_secret(_Config) ->
     assert_contains(
         read_file(Name, "Dockerfile"), "-e SECRET_KEY_BASE=\"$(openssl rand -base64 48)\""
     ).
+
+%% The template had the two-argument callbacks of a Nova long gone, in a
+%% file named after another module.
+plugin_template_has_the_callbacks_nova_calls(_Config) ->
+    assert_contains(
+        read_file(templates_dir(), "nova_plugin.template"),
+        "{template, \"nova/plugin.erl\", \"src/{{name}}.erl\"}"
+    ),
+    Source = string:replace(
+        read_file(templates_dir(), "nova/plugin.erl"), "{{name}}", "my_plugin", all
+    ),
+    ok = file:write_file("my_plugin.erl", Source),
+    {ok, my_plugin, Beam} = compile:file("my_plugin.erl", [binary, return_errors]),
+    true = is_binary(Beam),
+    {module, my_plugin} = code:load_binary(my_plugin, "my_plugin.erl", Beam),
+    try
+        ?assertEqual({ok, req, state}, my_plugin:pre_security(req, #{}, #{}, state)),
+        ?assertEqual({ok, req, state}, my_plugin:pre_request(req, #{}, #{}, state)),
+        ?assertEqual({ok, req, state}, my_plugin:post_request(req, #{}, #{}, state)),
+        ?assertMatch(#{title := _, version := _, authors := [_ | _]}, my_plugin:plugin_info())
+    after
+        code:purge(my_plugin),
+        code:delete(my_plugin)
+    end.
 
 assert_cookie_hook_in_prod_only(RebarConfig) ->
     Dev = prop(relx, RebarConfig),
