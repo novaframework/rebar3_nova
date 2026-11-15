@@ -13,6 +13,11 @@
  {nova, [
      {use_stacktrace, false},
      {environment, prod},
+     %% Signs session ids and CSRF tokens on a Nova later than 0.18, which
+     %% does not start with SECRET_KEY_BASE unset. Make one with
+     %% base64:encode(crypto:strong_rand_bytes(48)). in an Erlang shell, or
+     %% openssl rand -base64 48, and give every node the same one.
+     {secret_key_base, <<"${SECRET_KEY_BASE}">>},
      {cowboy_configuration, #{
          port => 8080,
          middleware_handlers => [

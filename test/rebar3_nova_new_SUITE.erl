@@ -35,7 +35,9 @@
     release_requires_the_cookie/1,
     pgo_prod_pool_uses_tls/1,
     migrations_are_a_release_step/1,
-    epmd_address_is_documented/1
+    epmd_address_is_documented/1,
+    prod_config_reads_the_secret_from_the_environment/1,
+    docker_run_names_the_secret/1
 ]).
 
 all() ->
@@ -70,7 +72,9 @@ all() ->
         release_requires_the_cookie,
         pgo_prod_pool_uses_tls,
         migrations_are_a_release_step,
-        epmd_address_is_documented
+        epmd_address_is_documented,
+        prod_config_reads_the_secret_from_the_environment,
+        docker_run_names_the_secret
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -689,6 +693,54 @@ pgo_prod_pool_uses_tls(_Config) ->
     Source = read_file(Name, "config/prod_sys.config.src"),
     assert_contains(Source, "ssl => ${DATABASE_SSL:-true}"),
     assert_contains(Source, "{server_name_indication, \"${DATABASE_HOST}\"}").
+
+%% A secret written into the config is the same for every project, and a
+%% Nova that signs with it does not start with a variable nobody filled in.
+prod_config_reads_the_secret_from_the_environment(_Config) ->
+    Name = "testapp_secret",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{arizona => true}),
+    Generated = read_file(Name, "config/prod_sys.config.src"),
+    Prod =
+        [Generated] ++
+            [
+                read_file(templates_dir(), Template)
+             || Template <- ["nova/prod_sys.config.src", "nova_fullstack/prod_sys.config.src"]
+            ],
+    [
+        begin
+            ?assertEqual(
+                {match, [["<<\"${SECRET_KEY_BASE}\">>"]]},
+                re:run(Source, "secret_key_base, (<<[^>]*>>)", [global, {capture, [1], list}])
+            ),
+            assert_contains(Source, "base64:encode(crypto:strong_rand_bytes(48))."),
+            assert_contains(Source, "openssl rand -base64 48")
+        end
+     || Source <- Prod
+    ],
+    Dev =
+        [read_file(Name, "config/dev_sys.config.src")] ++
+            [
+                read_file(templates_dir(), Template)
+             || Template <- [
+                    "nova/dev_sys.config.src",
+                    "nova_lfe/dev_sys.config.src",
+                    "nova_fullstack/dev_sys.config.src"
+                ]
+            ],
+    [assert_not_contains(Source, "secret_key_base") || Source <- Dev],
+    ok = file:write_file(
+        "filled.config",
+        string:replace(Generated, "${SECRET_KEY_BASE}", "from the environment", all)
+    ),
+    {ok, [Terms]} = consult_env_substituted("filled.config"),
+    ?assertEqual(~"from the environment", prop(secret_key_base, prop(nova, Terms))).
+
+docker_run_names_the_secret(_Config) ->
+    Name = "testapp_dockersecret",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{docker => true}),
+    assert_contains(
+        read_file(Name, "Dockerfile"), "-e SECRET_KEY_BASE=\"$(openssl rand -base64 48)\""
+    ).
 
 assert_cookie_hook_in_prod_only(RebarConfig) ->
     Dev = prop(relx, RebarConfig),
