@@ -26,6 +26,8 @@
     config_json_lib_is_read_from_the_bootstrap_app/1,
     config_raw_otp_json_is_an_error/1,
     config_json_lib_under_nova_warns/1,
+    config_json_lib_default_follows_nova/1,
+    config_missing_json_lib_names_the_default/1,
     config_session_manager_default_is_ok/1,
     config_session_backend_warns/1,
     config_sessions_disabled/1
@@ -50,6 +52,8 @@ all() ->
         config_json_lib_is_read_from_the_bootstrap_app,
         config_raw_otp_json_is_an_error,
         config_json_lib_under_nova_warns,
+        config_json_lib_default_follows_nova,
+        config_missing_json_lib_names_the_default,
         config_session_manager_default_is_ok,
         config_session_backend_warns,
         config_sessions_disabled,
@@ -155,6 +159,21 @@ config_raw_otp_json_is_an_error(_Config) ->
 config_json_lib_under_nova_warns(_Config) ->
     Config = [{nova, [{bootstrap_application, blog}, {json_lib, json}]}],
     ?assertMatch([{warn, "json_lib is set under nova", _}], warnings(Config)).
+
+%% Nova 0.18 and earlier list thoas among their applications and use it by
+%% default; a Nova without it uses OTP's json.
+config_json_lib_default_follows_nova(_Config) ->
+    ?assertEqual(thoas, rebar3_nova_utils:default_json_lib([kernel, stdlib, cowboy, thoas])),
+    ?assertEqual(json, rebar3_nova_utils:default_json_lib([kernel, stdlib, cowboy])),
+    Default = rebar3_nova_utils:default_json_lib(),
+    Config = [{nova, [{bootstrap_application, blog}]}],
+    ?assertEqual(lists:flatten(io_lib:format("json_lib = ~p", [Default])), hd(ok_messages(Config))).
+
+config_missing_json_lib_names_the_default(_Config) ->
+    Config = [{nova, [{bootstrap_application, blog}]}, {blog, [{json_lib, my_json}]}],
+    [{error, _, Hint} | _] = findings(Config, missing),
+    Default = atom_to_list(rebar3_nova_utils:default_json_lib()),
+    ?assertNotEqual(nomatch, string:find(lists:flatten(Hint), "the default (" ++ Default ++ ")")).
 
 config_session_manager_default_is_ok(_Config) ->
     Config = [{nova, [{bootstrap_application, blog}]}],

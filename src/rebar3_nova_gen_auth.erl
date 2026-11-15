@@ -2,6 +2,9 @@
 
 -export([init/1, do/1, format_error/1]).
 
+%% Exported for rebar3_nova_gen_SUITE.
+-export([generate_auth/2, generate_test_suite/2]).
+
 -define(PROVIDER, gen_auth).
 -define(DEPS, [{default, compile}]).
 
@@ -438,7 +441,7 @@ generate_auth(App, AppDir) ->
         "            unauthorized()\n"
         "    end.\n\n"
         "unauthorized() ->\n"
-        "    Body = thoas:encode(#{<<\"error\">> => <<\"unauthorized\">>}),\n"
+        "    Body = json:encode(#{<<\"error\">> => <<\"unauthorized\">>}),\n"
         "    {false, 401, #{<<\"content-type\">> => <<\"application/json\">>}, Body}.\n"
     ],
     rebar3_nova_utils:write_file_if_not_exists(FileName, Content).
@@ -745,10 +748,9 @@ generate_test_suite(App, AppDir) ->
         "        false -> \"\"\n"
         "    end.\n\n"
         "encode(Map) ->\n"
-        "    binary_to_list(thoas:encode(Map)).\n\n"
+        "    binary_to_list(iolist_to_binary(json:encode(Map))).\n\n"
         "decode(Body) ->\n"
-        "    {ok, Json} = thoas:decode(list_to_binary(Body)),\n"
-        "    Json.\n"
+        "    json:decode(list_to_binary(Body)).\n"
     ],
     rebar3_nova_utils:write_file_if_not_exists(FileName, Content).
 
