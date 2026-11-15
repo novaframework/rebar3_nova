@@ -191,7 +191,8 @@ check_config(State) ->
     AppName = rebar3_nova_utils:get_app_name(State),
     Config = rebar3_nova_utils:load_sys_config(State),
     Bootstrap = bootstrap_app(Config, AppName),
-    JsonLib = proplists:get_value(json_lib, app_env(Config, Bootstrap), thoas),
+    Default = rebar3_nova_utils:default_json_lib(),
+    JsonLib = proplists:get_value(json_lib, app_env(Config, Bootstrap), Default),
     config_findings(Config, AppName, json_lib_status(JsonLib)).
 
 -doc """
@@ -204,7 +205,7 @@ config_findings(Config, AppName, JsonStatus) ->
     NovaConfig = app_env(Config, nova),
     Bootstrap = bootstrap_app(Config, AppName),
     BootstrapConfig = app_env(Config, Bootstrap),
-    JsonLib = proplists:get_value(json_lib, BootstrapConfig, thoas),
+    JsonLib = proplists:get_value(json_lib, BootstrapConfig, rebar3_nova_utils:default_json_lib()),
     Cowboy = proplists:get_value(cowboy_configuration, NovaConfig, #{port => 8080}),
     CowboyFinding =
         case maps:get(port, Cowboy, undefined) of
@@ -252,7 +253,10 @@ json_finding(JsonLib, ok) ->
     {ok, io_lib:format("json_lib = ~p", [JsonLib])};
 json_finding(JsonLib, missing) ->
     {error, io_lib:format("json_lib = ~p, but that module is not available", [JsonLib]),
-        "Add the library to deps, or remove json_lib to use the default (thoas)"};
+        io_lib:format(
+            "Add the library to deps, or remove json_lib to use the default (~p)",
+            [rebar3_nova_utils:default_json_lib()]
+        )};
 json_finding(JsonLib, incomplete) ->
     {error, io_lib:format("json_lib = ~p does not export encode/1 and decode/1", [JsonLib]),
         "Nova calls JsonLib:encode/1 and JsonLib:decode/1"};

@@ -247,7 +247,7 @@ $ rebar3 nova config
     dispatch_backend          persistent_term (default)
 
   {myapp, [...]}
-    json_lib                  thoas (default)
+    json_lib                  json (default)
     use_sessions              true (default)
 ```
 

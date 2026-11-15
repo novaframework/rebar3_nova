@@ -79,7 +79,10 @@ config_flags_bootstrap_keys_set_under_nova(_Config) ->
     ?assertEqual({misplaced, json, blog}, proplists:get_value(json_lib, Blog)).
 
 config_lists_current_nova_keys(_Config) ->
-    [{nova, Nova}, {app, _}] = rebar3_nova_config:config_sections([], app),
+    [{nova, Nova}, {app, App}] = rebar3_nova_config:config_sections([], app),
+    ?assertEqual(
+        {default, rebar3_nova_utils:default_json_lib()}, proplists:get_value(json_lib, App)
+    ),
     ?assertEqual(missing, proplists:get_value(bootstrap_application, Nova)),
     ?assertEqual({default, true}, proplists:get_value(render_error_pages, Nova)),
     ?assertEqual({default, false}, proplists:get_value(use_strict_routing, Nova)),

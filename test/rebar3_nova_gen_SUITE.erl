@@ -16,7 +16,8 @@
     test_suite_follows_the_routes/1,
     test_suite_compiles/1,
     test_suite_is_erlfmt_formatted/1,
-    test_suite_reads_the_port_at_runtime/1
+    test_suite_reads_the_port_at_runtime/1,
+    auth_files_use_otp_json/1
 ]).
 
 -define(ACTIONS, [list, show, create, update, delete]).
@@ -34,7 +35,8 @@ all() ->
         test_suite_follows_the_routes,
         test_suite_compiles,
         test_suite_is_erlfmt_formatted,
-        test_suite_reads_the_port_at_runtime
+        test_suite_reads_the_port_at_runtime,
+        auth_files_use_otp_json
     ].
 
 init_per_suite(Config) ->
@@ -204,3 +206,24 @@ eval_hint(Expression) ->
     {ok, [Expr]} = erl_parse:parse_exprs(Tokens),
     {value, Value, _} = erl_eval:expr(Expr, []),
     Value.
+
+%% Nova no longer depends on thoas, so generated code that called it would
+%% not run. OTP's json is there on every Nova.
+auth_files_use_otp_json(Config) ->
+    AppDir = filename:join(proplists:get_value(priv_dir, Config), "gen_auth_app"),
+    ok = filelib:ensure_path(filename:join(AppDir, "src")),
+    ok = filelib:ensure_path(filename:join(AppDir, "test")),
+    rebar3_nova_gen_auth:generate_auth("blog", AppDir),
+    rebar3_nova_gen_auth:generate_test_suite("blog", AppDir),
+    Files = [
+        filename:join([AppDir, "src", "blog_auth.erl"]),
+        filename:join([AppDir, "test", "blog_auth_SUITE.erl"])
+    ],
+    lists:foreach(
+        fun(File) ->
+            {ok, Source} = file:read_file(File),
+            ?assertEqual(nomatch, binary:match(Source, ~"thoas"), File),
+            ?assertMatch({ok, _, _}, compile:file(File, [binary, return_errors]), File)
+        end,
+        Files
+    ).

@@ -9,6 +9,8 @@
     copy_priv_file/2,
     parse_actions/1,
     load_sys_config/1,
+    default_json_lib/0,
+    default_json_lib/1,
     sys_config_path/1,
     compile_routes/2,
     compile_app_routes/1,
@@ -150,4 +152,26 @@ log_warn(Fmt, Args) ->
         rebar_api:warn(Fmt, Args)
     catch
         error:undef -> io:format("Warning: " ++ Fmt ++ "~n", Args)
+    end.
+
+-doc """
+The JSON library the project's Nova uses when `json_lib` is not set.
+""".
+-spec default_json_lib() -> thoas | json.
+default_json_lib() ->
+    _ = application:load(nova),
+    case application:get_key(nova, applications) of
+        {ok, Applications} -> default_json_lib(Applications);
+        undefined -> json
+    end.
+
+-doc """
+`thoas` for a Nova that lists it among its applications (0.18 and earlier),
+OTP's `json` for one that does not.
+""".
+-spec default_json_lib([atom()]) -> thoas | json.
+default_json_lib(NovaApplications) ->
+    case lists:member(thoas, NovaApplications) of
+        true -> thoas;
+        false -> json
     end.

@@ -25,6 +25,7 @@ init(State) ->
 
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
+    rebar_paths:set_paths([deps, plugins], State),
     Config = rebar3_nova_utils:load_sys_config(State),
     AppName = rebar3_nova_utils:get_app_name(State),
     io:format("~n=== Nova Configuration ===~n"),
@@ -75,7 +76,7 @@ nova_keys() ->
 
 bootstrap_keys() ->
     [
-        {json_lib, thoas},
+        {json_lib, rebar3_nova_utils:default_json_lib()},
         {use_sessions, true}
     ].
 
