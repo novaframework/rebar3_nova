@@ -81,7 +81,9 @@ print_route_hints(AppName, Name, Actions) ->
 Route groups for the actions: reads in one, and create, update and delete in
 another behind a security function, so the writes are not public by default.
 The write group lists its own plugins, with a body size limit before the
-body decoder.
+body decoder, and says that its security function does not read the decoded
+body, which a Nova that decodes the body behind the security function asks
+a route group to say.
 """.
 -spec route_hints(atom(), string(), [atom()]) -> string().
 route_hints(AppName, Name, Actions) ->
@@ -101,8 +103,14 @@ route_hints(AppName, Name, Actions) ->
         "  %% and ~s_body_limit with a plugin that refuses large bodies. Until\n"
         "  %% both exist, these routes fail closed.\n"
         "  security => fun ~s_auth_security:require_bearer/1,\n"
-        "  %% Plugins run before security, so the group sets its own instead of\n"
-        "  %% inheriting a global body decoder that reads any size of body.\n"
+        "  %% Says that the security function does not read the decoded body.\n"
+        "  %% Nova 0.18 and earlier do not read this key.\n"
+        "  security_reads_body => false,\n"
+        "  %% The group sets its own plugins instead of inheriting a global body\n"
+        "  %% decoder that reads any size of body. Nova 0.18 and earlier run\n"
+        "  %% pre_request/4 before security. A later Nova runs it once security\n"
+        "  %% let the request through, and asks a plugin of yours in this group\n"
+        "  %% to have pre_security/4, which it runs before security.\n"
         "  plugins => [\n"
         "      {pre_request, ~s_body_limit, #{}},\n"
         "      {pre_request, nova_request_plugin, #{decode_json_body => true}}~ts\n"

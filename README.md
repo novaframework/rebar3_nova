@@ -131,8 +131,14 @@ $ rebar3 nova gen_resource --name products
 ===>     %% and myapp_body_limit with a plugin that refuses large bodies. Until
 ===>     %% both exist, these routes fail closed.
 ===>     security => fun myapp_auth_security:require_bearer/1,
-===>     %% Plugins run before security, so the group sets its own instead of
-===>     %% inheriting a global body decoder that reads any size of body.
+===>     %% Says that the security function does not read the decoded body.
+===>     %% Nova 0.18 and earlier do not read this key.
+===>     security_reads_body => false,
+===>     %% The group sets its own plugins instead of inheriting a global body
+===>     %% decoder that reads any size of body. Nova 0.18 and earlier run
+===>     %% pre_request/4 before security. A later Nova runs it once security
+===>     %% let the request through, and asks a plugin of yours in this group
+===>     %% to have pre_security/4, which it runs before security.
 ===>     plugins => [
 ===>         {pre_request, myapp_body_limit, #{}},
 ===>         {pre_request, nova_request_plugin, #{decode_json_body => true}},
@@ -145,7 +151,7 @@ $ rebar3 nova gen_resource --name products
 ===>     ]}
 ```
 
-Create, update and delete come in a group of their own behind a `security` function, so pasting the snippet does not make the writes public. Until you replace the placeholders with your own security function and body limit plugin, those routes fail closed. The group lists its own plugins, because Nova runs pre-request plugins before security: an inherited global body decoder would read a body of any size from a request without a token. A group's plugins replace the global ones, so `nova_json_schemas` is listed again when a route has a `json_schema`.
+Create, update and delete come in a group of their own behind a `security` function, so pasting the snippet does not make the writes public. Until you replace the placeholders with your own security function and body limit plugin, those routes fail closed. The group lists its own plugins, with a body limit ahead of the body decoder. Nova 0.18 and earlier run pre-request plugins before security, where an inherited global body decoder would read a body of any size from a request without a token; a later Nova runs them once security has let the request through, and warns about a group whose security function may expect the decoded body, and about a plugin of your own in such a group that has no `pre_security/4`, the callback it runs before security: give the body limit plugin one, which can refuse on the `content-length` header without reading the body. `security_reads_body => false` says that the function does not read it; remove the line, and list the decoder under `plugins_before_security`, if yours does. Nova 0.18 and earlier do not read the key. A group's plugins replace the global ones, so `nova_json_schemas` is listed again when a route has a `json_schema`.
 
 **Options:** Same as `gen_controller`.
 
@@ -167,6 +173,16 @@ $ rebar3 nova gen_test --name users
 | `--name`, `-n` | yes | — | Resource name |
 
 The paths, prefixes included, come from the compiled routes; with no routes for the controller yet, the suite assumes the `gen_resource` routes under `/{name}`. The generated suite starts `inets` and the application in `init_per_suite`, reads the port from the `nova` `cowboy_configuration` it runs with, uses `1` for path bindings and sends `{"name": "test"}` as the body, so it passes against the generated controller. Adapt the expectations as you implement the actions.
+
+### `nova gen_auth` - Generate email/password authentication
+
+Generates a migration, user and token schemas, an accounts module, a security module, session, registration and user controllers and a Common Test suite, for a project that uses [Kura](https://github.com/Taure/kura) and `bcrypt`, and prints the route groups to add to the router.
+
+```
+$ rebar3 nova gen_auth
+```
+
+The controllers store the session token of a user who registers, logs in or changes password or email with the call the project's Nova has for it: `nova_session:sign_in(Req, Key, Token)`, which moves the client to a new session id, on a Nova later than 0.18, and `nova_session:set(Req, Key, Token)` on Nova 0.18 and earlier. The generator does not overwrite files, so after upgrading Nova change the four `set` calls to `{ok, _SignedIn} = nova_session:sign_in(Req, Key, Token)` by hand. Logging out deletes the whole session. The protected route group says `security_reads_body => false`: its security function reads the session, not the decoded body.
 
 ### `nova openapi` — Generate OpenAPI 3.0.3 spec
 

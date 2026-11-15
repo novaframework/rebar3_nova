@@ -3,7 +3,15 @@
 -export([init/1, do/1, format_error/1]).
 
 %% Exported for rebar3_nova_gen_SUITE.
--export([generate_auth/2, generate_test_suite/2]).
+-export([
+    generate_auth/2,
+    generate_test_suite/2,
+    generate_controllers/3,
+    session_write/0,
+    route_hints/1
+]).
+
+-type session_write() :: sign_in | set.
 
 -define(PROVIDER, gen_auth).
 -define(DEPS, [{default, compile}]).
@@ -25,6 +33,7 @@ init(State) ->
 
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
+    rebar_paths:set_paths([deps, plugins], State),
     AppName = rebar3_nova_utils:get_app_name(State),
     AppDir = rebar3_nova_utils:get_app_dir(State),
     App = atom_to_list(AppName),
@@ -33,9 +42,7 @@ do(State) ->
     generate_user_token_schema(App, AppDir),
     generate_accounts(App, AppDir),
     generate_auth(App, AppDir),
-    generate_session_controller(App, AppDir),
-    generate_registration_controller(App, AppDir),
-    generate_user_controller(App, AppDir),
+    generate_controllers(App, AppDir, session_write()),
     generate_test_suite(App, AppDir),
     print_instructions(App),
     {ok, State}.
@@ -447,10 +454,41 @@ generate_auth(App, AppDir) ->
     rebar3_nova_utils:write_file_if_not_exists(FileName, Content).
 
 %%======================================================================
+%% Controllers
+%%======================================================================
+
+-doc """
+How the generated controllers store the session token of a user who signs
+in: with `nova_session:sign_in/3`, which moves the client to a new session
+id, where the project's Nova has it, and with `nova_session:set/3` on Nova
+0.18 and earlier.
+""".
+-spec session_write() -> session_write().
+session_write() ->
+    _ = code:ensure_loaded(nova_session),
+    case erlang:function_exported(nova_session, sign_in, 3) of
+        true -> sign_in;
+        false -> set
+    end.
+
+-doc "The session, registration and user controllers.".
+-spec generate_controllers(string(), file:filename_all(), session_write()) -> ok.
+generate_controllers(App, AppDir, SessionWrite) ->
+    _ = generate_session_controller(App, AppDir, SessionWrite),
+    _ = generate_registration_controller(App, AppDir, SessionWrite),
+    _ = generate_user_controller(App, AppDir, SessionWrite),
+    ok.
+
+store_token(sign_in) ->
+    "            {ok, _SignedIn} = nova_session:sign_in(Req, <<\"session_token\">>, Token),\n";
+store_token(set) ->
+    "            ok = nova_session:set(Req, <<\"session_token\">>, Token),\n".
+
+%%======================================================================
 %% Session controller
 %%======================================================================
 
-generate_session_controller(App, AppDir) ->
+generate_session_controller(App, AppDir, SessionWrite) ->
     Mod = App ++ "_session_controller",
     Accounts = App ++ "_accounts",
     FileName = filename:join([AppDir, "src", "controllers", Mod ++ ".erl"]),
@@ -467,8 +505,8 @@ generate_session_controller(App, AppDir) ->
         "        {ok, User} ->\n"
         "            {ok, Token} = ",
         Accounts,
-        ":generate_session_token(User),\n"
-        "            ok = nova_session:set(Req, <<\"session_token\">>, Token),\n"
+        ":generate_session_token(User),\n",
+        store_token(SessionWrite),
         "            {json, #{<<\"user\">> => ",
         Accounts,
         ":user_to_json(User)}};\n"
@@ -484,7 +522,7 @@ generate_session_controller(App, AppDir) ->
         "        _ ->\n"
         "            ok\n"
         "    end,\n"
-        "    nova_session:delete(Req, <<\"session_token\">>),\n"
+        "    {ok, _SignedOut} = nova_session:delete(Req),\n"
         "    {status, 204}.\n"
     ],
     rebar3_nova_utils:write_file_if_not_exists(FileName, Content).
@@ -493,7 +531,7 @@ generate_session_controller(App, AppDir) ->
 %% Registration controller
 %%======================================================================
 
-generate_registration_controller(App, AppDir) ->
+generate_registration_controller(App, AppDir, SessionWrite) ->
     Mod = App ++ "_registration_controller",
     Accounts = App ++ "_accounts",
     FileName = filename:join([AppDir, "src", "controllers", Mod ++ ".erl"]),
@@ -510,8 +548,8 @@ generate_registration_controller(App, AppDir) ->
         "        {ok, User} ->\n"
         "            {ok, Token} = ",
         Accounts,
-        ":generate_session_token(User),\n"
-        "            ok = nova_session:set(Req, <<\"session_token\">>, Token),\n"
+        ":generate_session_token(User),\n",
+        store_token(SessionWrite),
         "            {json, 201, #{}, #{<<\"user\">> => ",
         Accounts,
         ":user_to_json(User)}};\n"
@@ -527,7 +565,7 @@ generate_registration_controller(App, AppDir) ->
 %% User controller
 %%======================================================================
 
-generate_user_controller(App, AppDir) ->
+generate_user_controller(App, AppDir, SessionWrite) ->
     Mod = App ++ "_user_controller",
     Accounts = App ++ "_accounts",
     FileName = filename:join([AppDir, "src", "controllers", Mod ++ ".erl"]),
@@ -551,8 +589,8 @@ generate_user_controller(App, AppDir) ->
         "        {ok, UpdatedUser} ->\n"
         "            {ok, Token} = ",
         Accounts,
-        ":generate_session_token(UpdatedUser),\n"
-        "            ok = nova_session:set(Req, <<\"session_token\">>, Token),\n"
+        ":generate_session_token(UpdatedUser),\n",
+        store_token(SessionWrite),
         "            {json, #{<<\"user\">> => ",
         Accounts,
         ":user_to_json(UpdatedUser)}};\n"
@@ -573,8 +611,8 @@ generate_user_controller(App, AppDir) ->
         "        {ok, UpdatedUser} ->\n"
         "            {ok, Token} = ",
         Accounts,
-        ":generate_session_token(UpdatedUser),\n"
-        "            ok = nova_session:set(Req, <<\"session_token\">>, Token),\n"
+        ":generate_session_token(UpdatedUser),\n",
+        store_token(SessionWrite),
         "            {json, #{<<\"user\">> => ",
         Accounts,
         ":user_to_json(UpdatedUser)}};\n"
@@ -759,40 +797,14 @@ generate_test_suite(App, AppDir) ->
 %%======================================================================
 
 print_instructions(App) ->
-    AuthMod = App ++ "_auth",
-    SessionCtrl = App ++ "_session_controller",
-    RegCtrl = App ++ "_registration_controller",
-    UserCtrl = App ++ "_user_controller",
     rebar_api:info("~n==> Authentication files generated successfully!~n", []),
     rebar_api:info("Next steps:~n", []),
     rebar_api:info("1. Add kura and bcrypt to your deps in rebar.config:~n", []),
     rebar_api:info("   {deps, [..., kura, bcrypt]}.~n~n", []),
-    rebar_api:info("2. Add these routes to your router:~n", []),
-    rebar_api:info("   %% Public routes~n", []),
-    rebar_api:info(
-        "   #{prefix => <<\"/api\">>,~n"
-        "     security => false,~n"
-        "     plugins => [{pre_request, nova_request_plugin,~n"
-        "                  #{decode_json_body => true}}],~n"
-        "     routes => [~n"
-        "       {<<\"/register\">>, fun ~s:create/1, #{methods => [post]}},~n"
-        "       {<<\"/login\">>, fun ~s:create/1, #{methods => [post]}}~n"
-        "     ]}~n",
-        [RegCtrl, SessionCtrl]
-    ),
-    rebar_api:info("   %% Protected routes~n", []),
-    rebar_api:info(
-        "   #{prefix => <<\"/api\">>,~n"
-        "     security => fun ~s:require_authenticated/1,~n"
-        "     plugins => [{pre_request, nova_request_plugin,~n"
-        "                  #{decode_json_body => true}}],~n"
-        "     routes => [~n"
-        "       {<<\"/logout\">>, fun ~s:delete/1, #{methods => [delete]}},~n"
-        "       {<<\"/me\">>, fun ~s:show/1, #{methods => [get]}},~n"
-        "       {<<\"/me/password\">>, fun ~s:update_password/1, #{methods => [put]}},~n"
-        "       {<<\"/me/email\">>, fun ~s:update_email/1, #{methods => [put]}}~n"
-        "     ]}~n",
-        [AuthMod, SessionCtrl, UserCtrl, UserCtrl, UserCtrl]
+    rebar_api:info("2. Add these route groups to your router:~n", []),
+    lists:foreach(
+        fun(Line) -> rebar_api:info("   ~ts", [Line]) end,
+        string:split(route_hints(App), "\n", all)
     ),
     rebar_api:info("3. Add src/schemas and src/migrations to src_dirs in rebar.config:~n", []),
     rebar_api:info(
@@ -805,4 +817,45 @@ print_instructions(App) ->
         "5. Ensure nova_request_plugin with decode_json_body is configured~n"
         "   (either globally in sys.config or per route group as shown above).~n",
         []
+    ).
+
+-doc """
+The public and the protected route group for the generated controllers.
+The protected one says that its security function reads the session and not
+the decoded body, which a Nova that decodes the body behind the security
+function asks a route group to say. Nova 0.18 and earlier do not read the
+key.
+""".
+-spec route_hints(string()) -> string().
+route_hints(App) ->
+    AuthMod = App ++ "_auth",
+    SessionCtrl = App ++ "_session_controller",
+    RegCtrl = App ++ "_registration_controller",
+    UserCtrl = App ++ "_user_controller",
+    lists:flatten(
+        io_lib:format(
+            "%% Public routes\n"
+            "#{prefix => <<\"/api\">>,\n"
+            "  security => false,\n"
+            "  plugins => [{pre_request, nova_request_plugin,\n"
+            "               #{decode_json_body => true}}],\n"
+            "  routes => [\n"
+            "    {<<\"/register\">>, fun ~s:create/1, #{methods => [post]}},\n"
+            "    {<<\"/login\">>, fun ~s:create/1, #{methods => [post]}}\n"
+            "  ]},\n"
+            "%% Protected routes\n"
+            "#{prefix => <<\"/api\">>,\n"
+            "  security => fun ~s:require_authenticated/1,\n"
+            "  %% require_authenticated/1 reads the session, not the decoded body\n"
+            "  security_reads_body => false,\n"
+            "  plugins => [{pre_request, nova_request_plugin,\n"
+            "               #{decode_json_body => true}}],\n"
+            "  routes => [\n"
+            "    {<<\"/logout\">>, fun ~s:delete/1, #{methods => [delete]}},\n"
+            "    {<<\"/me\">>, fun ~s:show/1, #{methods => [get]}},\n"
+            "    {<<\"/me/password\">>, fun ~s:update_password/1, #{methods => [put]}},\n"
+            "    {<<\"/me/email\">>, fun ~s:update_email/1, #{methods => [put]}}\n"
+            "  ]}",
+            [RegCtrl, SessionCtrl, AuthMod, SessionCtrl, UserCtrl, UserCtrl, UserCtrl]
+        )
     ).

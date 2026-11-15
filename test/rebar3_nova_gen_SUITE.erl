@@ -17,7 +17,14 @@
     test_suite_compiles/1,
     test_suite_is_erlfmt_formatted/1,
     test_suite_reads_the_port_at_runtime/1,
-    auth_files_use_otp_json/1
+    auth_files_use_otp_json/1,
+    resource_write_hints_say_what_the_security_function_reads/1,
+    route_table_takes_the_hinted_group/1,
+    auth_controllers_sign_in_where_nova_can/1,
+    auth_controllers_store_the_token_on_an_older_nova/1,
+    auth_logout_deletes_the_session/1,
+    auth_session_write_follows_nova/1,
+    auth_route_hints_are_two_groups/1
 ]).
 
 -define(ACTIONS, [list, show, create, update, delete]).
@@ -36,7 +43,14 @@ all() ->
         test_suite_compiles,
         test_suite_is_erlfmt_formatted,
         test_suite_reads_the_port_at_runtime,
-        auth_files_use_otp_json
+        auth_files_use_otp_json,
+        resource_write_hints_say_what_the_security_function_reads,
+        route_table_takes_the_hinted_group,
+        auth_controllers_sign_in_where_nova_can,
+        auth_controllers_store_the_token_on_an_older_nova,
+        auth_logout_deletes_the_session,
+        auth_session_write_follows_nova,
+        auth_route_hints_are_two_groups
     ].
 
 init_per_suite(Config) ->
@@ -227,3 +241,86 @@ auth_files_use_otp_json(Config) ->
         end,
         Files
     ).
+
+%% A Nova that runs the body decoder behind the security function warns
+%% about a group that does not say whether the function reads the body.
+resource_write_hints_say_what_the_security_function_reads(_Config) ->
+    Hints = rebar3_nova_gen_resource:route_hints(blog, "tags", ?ACTIONS),
+    [Reads, Writes] = eval_hint("[" ++ Hints ++ "]"),
+    ?assertEqual(false, maps:get(security_reads_body, Writes)),
+    ?assertNot(maps:is_key(security_reads_body, Reads)),
+    ?assertEqual(nomatch, string:find(Hints, "Plugins run before security")).
+
+route_table_takes_the_hinted_group(_Config) ->
+    [_Reads, Writes] = eval_hint(
+        "[" ++ rebar3_nova_gen_resource:route_hints(blog, "tags", ?ACTIONS) ++ "]"
+    ),
+    rebar3_nova_test_router:set_routes([
+        Writes#{
+            security := fun test_security:allow/1,
+            plugins := [{pre_request, nova_request_plugin, #{decode_json_body => true}}]
+        }
+    ]),
+    {ok, Dispatch} = rebar3_nova_utils:route_table([rebar3_nova]),
+    ?assertEqual(
+        [~"/tags", ~"/tags/:id"],
+        lists:usort([Path || {Path, _, _} <- rebar3_nova_dispatch:routes(Dispatch)])
+    ).
+
+auth_controllers_sign_in_where_nova_can(Config) ->
+    Sources = auth_controllers(Config, "sign_in_app", sign_in),
+    ?assertEqual(
+        4, occurrences(Sources, ~"nova_session:sign_in(Req, <<\"session_token\">>, Token)")
+    ),
+    ?assertEqual(0, occurrences(Sources, ~"nova_session:set(")).
+
+auth_controllers_store_the_token_on_an_older_nova(Config) ->
+    Sources = auth_controllers(Config, "set_app", set),
+    ?assertEqual(
+        4, occurrences(Sources, ~"ok = nova_session:set(Req, <<\"session_token\">>, Token)")
+    ),
+    ?assertEqual(0, occurrences(Sources, ~"sign_in")).
+
+%% Deleting the one key left the session, and whatever else it held, behind.
+auth_logout_deletes_the_session(Config) ->
+    Sources = auth_controllers(Config, "logout_app", sign_in),
+    ?assertEqual(1, occurrences(Sources, ~"nova_session:delete(Req)")),
+    ?assertEqual(0, occurrences(Sources, ~"nova_session:delete(Req, ")).
+
+auth_session_write_follows_nova(_Config) ->
+    _ = code:ensure_loaded(nova_session),
+    Expected =
+        case erlang:function_exported(nova_session, sign_in, 3) of
+            true -> sign_in;
+            false -> set
+        end,
+    ?assertEqual(Expected, rebar3_nova_gen_auth:session_write()).
+
+auth_route_hints_are_two_groups(_Config) ->
+    [Public, Protected] = eval_hint("[" ++ rebar3_nova_gen_auth:route_hints("blog") ++ "]"),
+    ?assertEqual(false, maps:get(security, Public)),
+    ?assertNot(maps:is_key(security_reads_body, Public)),
+    ?assertEqual(fun blog_auth:require_authenticated/1, maps:get(security, Protected)),
+    ?assertEqual(false, maps:get(security_reads_body, Protected)),
+    ?assertEqual(2, length(maps:get(routes, Public))),
+    ?assertEqual(4, length(maps:get(routes, Protected))).
+
+auth_controllers(Config, Name, SessionWrite) ->
+    AppDir = ?config(priv_dir, Config) ++ "/" ++ Name,
+    ok = filelib:ensure_path(AppDir ++ "/src"),
+    rebar3_nova_gen_auth:generate_controllers("blog", AppDir, SessionWrite),
+    Files = [
+        AppDir ++ "/src/controllers/blog_" ++ Controller ++ "_controller.erl"
+     || Controller <- ["session", "registration", "user"]
+    ],
+    iolist_to_binary([
+        begin
+            ?assertMatch({ok, _, _}, compile:file(File, [binary, return_errors]), File),
+            {ok, Source} = file:read_file(File),
+            Source
+        end
+     || File <- Files
+    ]).
+
+occurrences(Source, Pattern) ->
+    length(binary:matches(Source, Pattern)).
