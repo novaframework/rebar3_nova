@@ -57,7 +57,9 @@ With `--kura`, and in `nova_fullstack`, the application does not migrate when it
 
 Releases keep distribution private by default: the node is named `my_app@localhost` and distribution is bound to `127.0.0.1`. A development release (`rebar3 release`) uses `config/dev_vm.args.src`, which takes the cookie from `~/.erlang.cookie`. A prod release (`rebar3 as prod release`, and the `--docker` image) uses `config/vm.args.src`, which takes it from the `RELEASE_COOKIE` environment variable, and requires it: a `pre_start` hook in the prod profile (`rel/hooks/require_cookie`, wired through `extended_start_script_hooks`) makes `bin/my_app start`, `daemon`, `foreground` and `console` exit with an error when it is unset or empty. Set it to the same secret on every node, e.g. `export RELEASE_COOKIE="$(openssl rand -hex 32)"` once, stored in your secret manager; `ping`, `stop`, `remote_console` and `rpc` read it too. For a cluster, also switch to `-name my_app@<host>` and drop the `inet_dist_use_interface` line. Keep `-setcookie ${RELEASE_COOKIE}` the last line of the file: an empty value there ends the arguments instead of taking the next one as the cookie. epmd, the port mapper, still listens on all interfaces (`0.0.0.0:4369`); set `ERL_EPMD_ADDRESS=127.0.0.1` in the environment before the first node on the host starts it to keep it on loopback too. The `--docker` image sets it.
 
-With `--kura` or `--pgo`, the prod config connects to PostgreSQL over TLS, verifying the server certificate against the OS trust store (for `--pgo`, `/etc/ssl/certs/ca-certificates.crt` and a `DATABASE_HOST` that is a host name); set `DATABASE_SSL=false` (`DB_SSL` in `nova_fullstack`) only for a database on the same host or a private network. The `--docker` image runs as an unprivileged `app` user that can write only `log` and the configs rendered into `releases/<vsn>` (the release itself stays owned by root), needs `RELEASE_COOKIE` at run time (`docker run -e RELEASE_COOKIE="$(openssl rand -hex 32)" -p 8080:8080 <image>`), its base images are pinned by digest, and a `.dockerignore` keeps `_build`, `.git` and `.env` out of the build context. The development `docker-compose.yml` publishes PostgreSQL on `127.0.0.1` only.
+`config/prod_sys.config.src` reads `secret_key_base` from the `SECRET_KEY_BASE` environment variable. A Nova later than 0.18 signs session ids and CSRF tokens with it and does not start a prod release while the variable is unset; Nova 0.18 and earlier do not read the setting. Make a secret once with `openssl rand -base64 48`, or `base64:encode(crypto:strong_rand_bytes(48)).` in an Erlang shell, keep it in your secret manager and give every node the same one. The development config sets none.
+
+With `--kura` or `--pgo`, the prod config connects to PostgreSQL over TLS, verifying the server certificate against the OS trust store (for `--pgo`, `/etc/ssl/certs/ca-certificates.crt` and a `DATABASE_HOST` that is a host name); set `DATABASE_SSL=false` (`DB_SSL` in `nova_fullstack`) only for a database on the same host or a private network. The `--docker` image runs as an unprivileged `app` user that can write only `log` and the configs rendered into `releases/<vsn>` (the release itself stays owned by root), needs `RELEASE_COOKIE` at run time, and `SECRET_KEY_BASE` with a Nova later than 0.18 (`docker run -e RELEASE_COOKIE="$(openssl rand -hex 32)" -e SECRET_KEY_BASE="$(openssl rand -base64 48)" -p 8080:8080 <image>`), its base images are pinned by digest, and a `.dockerignore` keeps `_build`, `.git` and `.env` out of the build context. The development `docker-compose.yml` publishes PostgreSQL on `127.0.0.1` only.
 
 Generated projects target OTP 29 and rebar3 3.27 (`.tool-versions`), depend on `{nova, "~> 0.18"}` and list `{rebar3_nova, "~> 0.13"}` as a project plugin.
 
@@ -131,8 +133,14 @@ $ rebar3 nova gen_resource --name products
 ===>     %% and myapp_body_limit with a plugin that refuses large bodies. Until
 ===>     %% both exist, these routes fail closed.
 ===>     security => fun myapp_auth_security:require_bearer/1,
-===>     %% Plugins run before security, so the group sets its own instead of
-===>     %% inheriting a global body decoder that reads any size of body.
+===>     %% Says that the security function does not read the decoded body.
+===>     %% Nova 0.18 and earlier do not read this key.
+===>     security_reads_body => false,
+===>     %% The group sets its own plugins instead of inheriting a global body
+===>     %% decoder that reads any size of body. Nova 0.18 and earlier run
+===>     %% pre_request/4 before security. A later Nova runs it once security
+===>     %% let the request through, and asks a plugin of yours in this group
+===>     %% to have pre_security/4, which it runs before security.
 ===>     plugins => [
 ===>         {pre_request, myapp_body_limit, #{}},
 ===>         {pre_request, nova_request_plugin, #{decode_json_body => true}},
@@ -145,7 +153,7 @@ $ rebar3 nova gen_resource --name products
 ===>     ]}
 ```
 
-Create, update and delete come in a group of their own behind a `security` function, so pasting the snippet does not make the writes public. Until you replace the placeholders with your own security function and body limit plugin, those routes fail closed. The group lists its own plugins, because Nova runs pre-request plugins before security: an inherited global body decoder would read a body of any size from a request without a token. A group's plugins replace the global ones, so `nova_json_schemas` is listed again when a route has a `json_schema`.
+Create, update and delete come in a group of their own behind a `security` function, so pasting the snippet does not make the writes public. Until you replace the placeholders with your own security function and body limit plugin, those routes fail closed. The group lists its own plugins, with a body limit ahead of the body decoder. Nova 0.18 and earlier run pre-request plugins before security, where an inherited global body decoder would read a body of any size from a request without a token; a later Nova runs them once security has let the request through, and warns about a group whose security function may expect the decoded body, and about a plugin of your own in such a group that has no `pre_security/4`, the callback it runs before security: give the body limit plugin one, which can refuse on the `content-length` header without reading the body. `security_reads_body => false` says that the function does not read it; remove the line, and list the decoder under `plugins_before_security`, if yours does. Nova 0.18 and earlier do not read the key. A group's plugins replace the global ones, so `nova_json_schemas` is listed again when a route has a `json_schema`.
 
 **Options:** Same as `gen_controller`.
 
@@ -167,6 +175,16 @@ $ rebar3 nova gen_test --name users
 | `--name`, `-n` | yes | — | Resource name |
 
 The paths, prefixes included, come from the compiled routes; with no routes for the controller yet, the suite assumes the `gen_resource` routes under `/{name}`. The generated suite starts `inets` and the application in `init_per_suite`, reads the port from the `nova` `cowboy_configuration` it runs with, uses `1` for path bindings and sends `{"name": "test"}` as the body, so it passes against the generated controller. Adapt the expectations as you implement the actions.
+
+### `nova gen_auth` - Generate email/password authentication
+
+Generates a migration, user and token schemas, an accounts module, a security module, session, registration and user controllers and a Common Test suite, for a project that uses [Kura](https://github.com/Taure/kura) and `bcrypt`, and prints the route groups to add to the router.
+
+```
+$ rebar3 nova gen_auth
+```
+
+The controllers store the session token of a user who registers, logs in or changes password or email with the call the project's Nova has for it: `nova_session:sign_in(Req, Key, Token)`, which moves the client to a new session id, on a Nova later than 0.18, and `nova_session:set(Req, Key, Token)` on Nova 0.18 and earlier. The generator does not overwrite files, so after upgrading Nova change the four `set` calls to `{ok, _SignedIn} = nova_session:sign_in(Req, Key, Token)` by hand. Logging out deletes the whole session. The protected route group says `security_reads_body => false`: its security function reads the session, not the decoded body.
 
 ### `nova openapi` — Generate OpenAPI 3.0.3 spec
 
@@ -224,11 +242,11 @@ $ rebar3 nova middleware
     POST /users -> myapp_users_controller:create
 ```
 
-Groups that don't specify their own `plugins` key inherit from the global Nova plugin configuration.
+Groups that don't specify their own `plugins` key inherit from the global Nova plugin configuration. The routes are those `routes/1` returns for the `environment` in sys.config, or for the default of the project's Nova when it is not set: `dev` up to Nova 0.18, `prod` for a later one.
 
 ### `nova config` — Show Nova configuration
 
-Displays the settings Nova reads from `sys.config`, grouped by the application env each one is read from, with current values or `(default)` when using built-in defaults. `json_lib` and `use_sessions` belong to the bootstrap application; a value set under `nova` instead is pointed out.
+Displays the settings Nova reads from `sys.config`, grouped by the application env each one is read from, with current values or `(default)` when using built-in defaults. `json_lib` and `use_sessions` belong to the bootstrap application; a value set under `nova` instead is pointed out. The defaults are those of the project's Nova: an unset `environment` is `dev` up to Nova 0.18 and `prod` for a later one.
 
 ```
 $ rebar3 nova config
@@ -252,6 +270,19 @@ $ rebar3 nova config
 ```
 
 Warns if `bootstrap_application` is not set.
+
+With a Nova later than 0.18 in the project, the settings that Nova checks when it starts are listed under `nova` as well:
+
+```
+    non_canonical_paths       reject (default)
+    trusted_origins           same_host (default)
+    csrf_token                undefined (default)
+    secret_key_base           set (not shown)
+    max_sessions              1000000 (default)
+    plugins_before_security   [] (default)
+```
+
+The value of `secret_key_base` is never printed. A setting that Nova no longer has and does not start with is listed with the one to use instead.
 
 ### `nova audit` — Audit route security
 
@@ -335,8 +366,8 @@ Summary: 67 ok, 2 warning(s), 0 error(s)
 |---------|--------|
 | `toolchain` | OTP version, rebar3 version, `.tool-versions` or `mise.toml` pinning |
 | `project` | `bootstrap_application` set, the router (`router_module` or `<app>_router`) exports `routes/1`, `.app.src` lists `nova` in `applications` |
-| `config` | `json_lib` (read from the bootstrap app) is loaded and exports `encode/1` and `decode/1`; `{json_lib, json}` is an error with a Nova whose request decoding expects `{ok, Term}`; `json_lib` set under `nova`; Cowboy port; `session_manager`, `use_sessions`, and the unused `session_backend` key |
-| `routes` | Every compiled route resolves to an exported handler (or captured fun); flags duplicate `{method, path}` pairs |
+| `config` | `json_lib` (read from the bootstrap app) is loaded and exports `encode/1` and `decode/1`; `{json_lib, json}` is an error with a Nova whose request decoding expects `{ok, Term}`; `json_lib` set under `nova`; Cowboy port; `session_manager`, `use_sessions`, and the unused `session_backend` key. With a Nova later than 0.18: an unset `environment` (read as `prod`), and the settings that Nova checks when it starts (`non_canonical_paths`, `trusted_origins`, `csrf_token`, `secret_key_base`, `max_sessions`, `plugins_before_security`), checked by the project's Nova itself, so a value it does not start with is an error here; a setting it no longer has; `{csrf_token, stateless}` without `secret_key_base`; one of them set under the bootstrap app, where Nova does not read it. The value of `secret_key_base` is in no finding |
+| `routes` | Every compiled route resolves to an exported handler (or captured fun); flags duplicate `{method, path}` pairs; names a route group setting that Nova refuses to compile the routes with |
 | `deps` | `rebar.lock` committed, active profiles |
 | `security` | `erl_crash.dump` and `.env` presence vs `.gitignore` (asked of `git check-ignore` in a git repository; otherwise a whole `.gitignore` line, so `.envrc` does not count), and a literal `-setcookie` in `config/vm.args(.src)` (a warning, so projects from 0.13.4 and earlier still pass) |
 | `build` | `_build/default` and app `ebin` exist |

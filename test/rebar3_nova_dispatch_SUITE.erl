@@ -35,7 +35,8 @@
     audit_strict_fails_on_a_warning/1,
     audit_reads_a_prod_config_src/1,
     audit_names_the_config_and_warns_without_one/1,
-    audit_restores_the_environment/1
+    audit_restores_the_environment/1,
+    route_table_names_a_setting_nova_refuses/1
 ]).
 
 -include_lib("common_test/include/ct.hrl").
@@ -70,7 +71,8 @@ all() ->
         audit_strict_fails_on_a_warning,
         audit_reads_a_prod_config_src,
         audit_names_the_config_and_warns_without_one,
-        audit_restores_the_environment
+        audit_restores_the_environment,
+        route_table_names_a_setting_nova_refuses
     ].
 
 init_per_suite(Config) ->
@@ -572,3 +574,37 @@ with_prod_only_route(Fun) ->
 
 mentioning(Text, Lines) ->
     [Line || Line <- Lines, string:find(Line, Text) =/= nomatch].
+
+%% Nova 0.18 does not read security_reads_body. A Nova that checks its
+%% settings refuses a value that is neither true nor false.
+route_table_names_a_setting_nova_refuses(_Config) ->
+    try
+        route_table_with_a_refused_setting()
+    after
+        rebar3_nova_test_router:set_routes(routes())
+    end.
+
+route_table_with_a_refused_setting() ->
+    rebar3_nova_test_router:set_routes([
+        #{
+            prefix => "",
+            security => fun test_security:allow/1,
+            security_reads_body => sometimes,
+            plugins => [{pre_request, nova_request_plugin, #{decode_json_body => true}}],
+            routes => [{"/tags", fun test_controller:index/1, #{methods => [post]}}]
+        }
+    ]),
+    case rebar3_nova_utils:settings_module() of
+        undefined ->
+            ?assertMatch({ok, _}, rebar3_nova_utils:route_table([rebar3_nova]));
+        _Settings ->
+            ?assertEqual(
+                {error, {invalid_setting, security_reads_body, sometimes}},
+                rebar3_nova_utils:route_table([rebar3_nova])
+            )
+    end,
+    Message = lists:flatten(
+        rebar3_nova_utils:invalid_setting_message(security_reads_body, sometimes)
+    ),
+    ?assertNotEqual(nomatch, string:find(Message, "security_reads_body")),
+    ?assertNotEqual(nomatch, string:find(Message, "sometimes")).

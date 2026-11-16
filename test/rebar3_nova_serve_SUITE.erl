@@ -134,4 +134,9 @@ assert_reload_keeps(Options) ->
     {ok, _, #nova_handler_value{secure = Secure, plugins = Plugins}} =
         nova_router:lookup_url('_', ~"/admin/b", ~"GET"),
     ?assertEqual(fun test_security:deny/1, Secure),
-    ?assertEqual([{pre_request, [{fun nova_request_plugin:pre_request/4, #{}}]}], Plugins).
+    ?assert(lists:member({fun nova_request_plugin:pre_request/4, #{}}, callbacks(Plugins))).
+
+%% Nova 0.18 keeps pre_request/4 in the pre_request phase, a later one in a
+%% phase behind the security callback.
+callbacks(Plugins) ->
+    [Callback || {_Phase, Callbacks} <- Plugins, is_list(Callbacks), Callback <- Callbacks].

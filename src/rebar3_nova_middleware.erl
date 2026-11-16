@@ -25,11 +25,14 @@ init(State) ->
 
 -spec do(rebar_state:t()) -> {ok, rebar_state:t()} | {error, string()}.
 do(State) ->
+    rebar_paths:set_paths([deps, plugins], State),
     AppName = rebar3_nova_utils:get_app_name(State),
     Config = rebar3_nova_utils:load_sys_config(State),
     NovaConfig = proplists:get_value(nova, Config, []),
     GlobalPlugins = proplists:get_value(plugins, NovaConfig, []),
-    Env = proplists:get_value(environment, NovaConfig, dev),
+    Env = proplists:get_value(
+        environment, NovaConfig, rebar3_nova_utils:default_environment()
+    ),
 
     io:format("~n=== Global Plugins ===~n"),
     print_plugins(GlobalPlugins, "  "),

@@ -3,7 +3,7 @@
 -export([init/1, do/1, format_error/1]).
 
 %% Exported for rebar3_nova_commands_SUITE.
--export([config_sections/2]).
+-export([config_sections/2, config_sections/3, format_section/1]).
 
 -define(PROVIDER, config).
 -define(DEPS, [{default, compile}]).
@@ -29,7 +29,7 @@ do(State) ->
     Config = rebar3_nova_utils:load_sys_config(State),
     AppName = rebar3_nova_utils:get_app_name(State),
     io:format("~n=== Nova Configuration ===~n"),
-    lists:foreach(fun print_section/1, config_sections(Config, AppName)),
+    io:put_chars([format_section(Section) || Section <- config_sections(Config, AppName)]),
     case proplists:get_value(bootstrap_application, app_env(Config, nova)) of
         undefined ->
             rebar_api:warn("~nbootstrap_application is not set in Nova config!", []);
@@ -38,15 +38,32 @@ do(State) ->
     end,
     {ok, State}.
 
--type value() :: {set, term()} | {default, term()} | missing | {misplaced, term(), atom()}.
+-type value() ::
+    {set, term()}
+    | {default, term()}
+    | missing
+    | {misplaced, term(), atom()}
+    | secret
+    | {removed, atom()}.
 
 -doc """
 The settings Nova reads, grouped by the application env each one lives
 in: `nova` itself, or the bootstrap application (read with
-`nova:get_env/2`).
+`nova:get_env/2`). The settings a later Nova than 0.18 checks at boot are
+listed when the project's Nova is one.
 """.
 -spec config_sections([{atom(), term()}], atom()) -> [{atom(), [{atom(), value()}]}].
 config_sections(Config, AppName) ->
+    config_sections(Config, AppName, rebar3_nova_utils:settings_module()).
+
+-doc """
+As `config_sections/2`, for a Nova whose settings module is `Settings`
+(`undefined` for one without). A set `secret_key_base` is listed as
+`secret`, never with its value.
+""".
+-spec config_sections([{atom(), term()}], atom(), module() | undefined) ->
+    [{atom(), [{atom(), value()}]}].
+config_sections(Config, AppName, Settings) ->
     NovaEnv = app_env(Config, nova),
     Bootstrap =
         case proplists:get_value(bootstrap_application, NovaEnv) of
@@ -59,12 +76,27 @@ config_sections(Config, AppName) ->
         {Key, bootstrap_value(Key, Default, BootstrapEnv, NovaEnv, Bootstrap)}
      || {Key, Default} <- bootstrap_keys()
     ],
-    [{nova, NovaKeys}, {Bootstrap, BootstrapKeys}].
+    [{nova, NovaKeys ++ checked_settings(Settings, NovaEnv)}, {Bootstrap, BootstrapKeys}].
+
+checked_settings(undefined, _NovaEnv) ->
+    [];
+checked_settings(Settings, NovaEnv) ->
+    [
+        {Key, checked_value(Key, lookup(Key, Default, NovaEnv))}
+     || {Key, Default} <- rebar3_nova_utils:checked_settings()
+    ] ++
+        [
+            {Key, {removed, Replacement}}
+         || {Key, Replacement} <- Settings:removed(), proplists:is_defined(Key, NovaEnv)
+        ].
+
+checked_value(secret_key_base, {set, _Secret}) -> secret;
+checked_value(_Key, Value) -> Value.
 
 nova_keys() ->
     [
         {bootstrap_application, required},
-        {environment, dev},
+        {environment, rebar3_nova_utils:default_environment()},
         {cowboy_configuration, #{port => 8080}},
         {plugins, []},
         {use_stacktrace, false},
@@ -99,18 +131,27 @@ app_env(Config, App) ->
         _ -> []
     end.
 
-print_section({App, Keys}) ->
-    io:format("~n  {~p, [...]}~n", [App]),
-    lists:foreach(fun print_key/1, Keys).
+-doc "A section of `config_sections/2` as the lines the command prints.".
+-spec format_section({atom(), [{atom(), value()}]}) -> io_lib:chars().
+format_section({App, Keys}) ->
+    [io_lib:format("~n  {~p, [...]}~n", [App]), [format_key(Key) || Key <- Keys]].
 
-print_key({Key, missing}) ->
-    io:format("    ~-25s *** MISSING (required) ***~n", [Key]);
-print_key({Key, {default, Default}}) ->
-    io:format("    ~-25s ~p (default)~n", [Key, Default]);
-print_key({Key, {set, Value}}) ->
-    io:format("    ~-25s ~p~n", [Key, Value]);
-print_key({Key, {misplaced, Value, Bootstrap}}) ->
-    io:format("    ~-25s ~p under nova, but Nova reads this key from ~p~n", [Key, Value, Bootstrap]).
+format_key({Key, missing}) ->
+    io_lib:format("    ~-25s *** MISSING (required) ***~n", [Key]);
+format_key({Key, {default, Default}}) ->
+    io_lib:format("    ~-25s ~p (default)~n", [Key, Default]);
+format_key({Key, {set, Value}}) ->
+    io_lib:format("    ~-25s ~p~n", [Key, Value]);
+format_key({Key, secret}) ->
+    io_lib:format("    ~-25s set (not shown)~n", [Key]);
+format_key({Key, {removed, Replacement}}) ->
+    io_lib:format("    ~-25s no longer a setting: Nova does not start with it, use ~p~n", [
+        Key, Replacement
+    ]);
+format_key({Key, {misplaced, Value, Bootstrap}}) ->
+    io_lib:format("    ~-25s ~p under nova, but Nova reads this key from ~p~n", [
+        Key, Value, Bootstrap
+    ]).
 
 -spec format_error(any()) -> iolist().
 format_error(Reason) ->

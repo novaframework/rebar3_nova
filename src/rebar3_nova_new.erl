@@ -728,6 +728,7 @@ sys_config_nova(Name, Env, Flags) ->
         "     {environment, ",
         EnvName,
         "},\n",
+        sys_config_secret(Env),
         "     {cowboy_configuration, #{\n",
         "         port => 8080",
         sys_config_middlewares(Flags),
@@ -740,6 +741,17 @@ sys_config_nova(Name, Env, Flags) ->
         "         {pre_request, nova_request_plugin, #{decode_json_body => true}}\n",
         "     ]}\n",
         " ]}"
+    ].
+
+sys_config_secret(dev) ->
+    [];
+sys_config_secret(prod) ->
+    [
+        "     %% Signs session ids and CSRF tokens on a Nova later than 0.18, which\n",
+        "     %% does not start with SECRET_KEY_BASE unset. Make one with\n",
+        "     %% base64:encode(crypto:strong_rand_bytes(48)). in an Erlang shell, or\n",
+        "     %% openssl rand -base64 48, and give every node the same one.\n",
+        "     {secret_key_base, <<\"${SECRET_KEY_BASE}\">>},\n"
     ].
 
 sys_config_middlewares(#{arizona := true}) ->
@@ -1219,8 +1231,11 @@ maybe_generate_docker(Name, #{docker := true}) ->
         "ENV ERL_EPMD_ADDRESS=127.0.0.1\n\n",
         "USER app\n\n",
         "EXPOSE 8080\n\n",
-        "# RELEASE_COOKIE is required, or the node refuses to start:\n",
-        "#   docker run -e RELEASE_COOKIE=\"$(openssl rand -hex 32)\" -p 8080:8080 <image>\n",
+        "# RELEASE_COOKIE is required, or the node refuses to start. SECRET_KEY_BASE\n",
+        "# fills secret_key_base in config/prod_sys.config.src, and a Nova later than\n",
+        "# 0.18 refuses to start without it:\n",
+        "#   docker run -e RELEASE_COOKIE=\"$(openssl rand -hex 32)\" \\\n",
+        "#     -e SECRET_KEY_BASE=\"$(openssl rand -base64 48)\" -p 8080:8080 <image>\n",
         "CMD [\"bin/",
         Name,
         "\", \"foreground\"]\n"

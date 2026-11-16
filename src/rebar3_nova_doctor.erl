@@ -11,6 +11,9 @@
     section_status/1,
     parse_csv/1,
     config_findings/3,
+    environment_findings/2,
+    settings_findings/3,
+    route_findings/1,
     security_findings/1
 ]).
 -endif.
@@ -193,7 +196,9 @@ check_config(State) ->
     Bootstrap = bootstrap_app(Config, AppName),
     Default = rebar3_nova_utils:default_json_lib(),
     JsonLib = proplists:get_value(json_lib, app_env(Config, Bootstrap), Default),
-    config_findings(Config, AppName, json_lib_status(JsonLib)).
+    config_findings(Config, AppName, json_lib_status(JsonLib)) ++
+        environment_findings(Config, rebar3_nova_utils:default_environment()) ++
+        settings_findings(Config, AppName, rebar3_nova_utils:settings_module()).
 
 -doc """
 Findings for a sys.config. `json_lib` and `use_sessions` are read from the
@@ -303,6 +308,99 @@ session_findings(NovaConfig, BootstrapConfig, Bootstrap) ->
         end,
     Stale ++ [Sessions].
 
+-doc """
+A warning for a sys.config without `environment` where the project's Nova
+reads that as `prod`: the config `rebar3 shell` uses then runs without what
+`dev` turns on.
+""".
+-spec environment_findings([{atom(), term()}], atom()) -> [finding()].
+environment_findings(Config, Default) ->
+    case proplists:is_defined(environment, app_env(Config, nova)) of
+        false when Default =/= dev ->
+            [
+                {warn,
+                    io_lib:format("environment is not set, and this Nova reads that as ~p", [
+                        Default
+                    ]), "Add {environment, dev} under {nova, [...]} in the development sys.config"}
+            ];
+        _ ->
+            []
+    end.
+
+-doc """
+Findings for the settings a later Nova than 0.18 checks when it starts,
+checked with that Nova's own `Settings` module so the doctor refuses what
+the boot refuses. None for a Nova without one (`undefined`). The value of
+`secret_key_base` is in no finding.
+""".
+-spec settings_findings([{atom(), term()}], atom(), module() | undefined) -> [finding()].
+settings_findings(_Config, _AppName, undefined) ->
+    [];
+settings_findings(Config, AppName, Settings) ->
+    NovaConfig = app_env(Config, nova),
+    Bootstrap = bootstrap_app(Config, AppName),
+    Checked = rebar3_nova_utils:checked_settings(),
+    removed_settings(Settings, NovaConfig) ++
+        [
+            setting_finding(Settings, Key, Default, proplists:lookup(Key, NovaConfig))
+         || {Key, Default} <- Checked
+        ] ++
+        unsigned_token(NovaConfig) ++
+        misplaced_settings(
+            [Key || {Key, _Default} <- Checked], app_env(Config, Bootstrap), Bootstrap
+        ).
+
+removed_settings(Settings, NovaConfig) ->
+    [
+        {error, io_lib:format("~p is no longer a setting, and Nova does not start with it", [Key]),
+            io_lib:format("Use ~p", [Replacement])}
+     || {Key, Replacement} <- Settings:removed(), proplists:is_defined(Key, NovaConfig)
+    ].
+
+setting_finding(_Settings, secret_key_base, _Default, none) ->
+    {ok, "secret_key_base is not set"};
+setting_finding(Settings, secret_key_base, _Default, {secret_key_base, Secret}) ->
+    case Settings:checked(secret_key_base, Secret) of
+        {ok, _Keys} ->
+            {ok, "secret_key_base is set"};
+        {error, _Redacted} ->
+            {error, "secret_key_base is set to a value Nova does not start with",
+                Settings:expected(secret_key_base)}
+    end;
+setting_finding(_Settings, Key, Default, none) ->
+    {ok, io_lib:format("~p = ~p (default)", [Key, Default])};
+setting_finding(Settings, Key, _Default, {Key, Value}) ->
+    case Settings:checked(Key, Value) of
+        {ok, _Checked} ->
+            {ok, io_lib:format("~p = ~p", [Key, Value])};
+        {error, _Refused} ->
+            {error, io_lib:format("~p = ~p, which Nova does not start with", [Key, Value]),
+                Settings:expected(Key)}
+    end.
+
+unsigned_token(NovaConfig) ->
+    Stateless = proplists:get_value(csrf_token, NovaConfig) =:= stateless,
+    case Stateless andalso not proplists:is_defined(secret_key_base, NovaConfig) of
+        true ->
+            [
+                {error, "csrf_token is stateless and secret_key_base is not set",
+                    "Nova signs a stateless token with secret_key_base and does not start "
+                    "without it. Set secret_key_base, or csrf_token to session"}
+            ];
+        false ->
+            []
+    end.
+
+misplaced_settings(_Keys, _BootstrapConfig, nova) ->
+    [];
+misplaced_settings(Keys, BootstrapConfig, Bootstrap) ->
+    [
+        {warn, io_lib:format("~p is set under ~p", [Key, Bootstrap]),
+            "Nova reads this setting from {nova, [...]} alone, whichever application is the "
+            "bootstrap one"}
+     || Key <- Keys, proplists:is_defined(Key, BootstrapConfig)
+    ].
+
 bootstrap_app(Config, AppName) ->
     case proplists:get_value(bootstrap_application, app_env(Config, nova)) of
         Bootstrap when is_atom(Bootstrap), Bootstrap =/= undefined -> Bootstrap;
@@ -317,14 +415,9 @@ app_env(Config, App) ->
 
 check_routes(State) ->
     AppName = rebar3_nova_utils:get_app_name(State),
-    try rebar3_nova_utils:compile_routes(State, AppName) of
-        Dispatch ->
-            Routes = collect_route_handlers(Dispatch),
-            HandlerFindings = [check_handler(R) || R <- Routes],
-            DupFinding = check_duplicate_routes(Routes),
-            CountFinding =
-                {ok, io_lib:format("~b routes compiled", [length(Routes)])},
-            [CountFinding | HandlerFindings] ++ DupFinding
+    rebar_paths:set_paths([deps, plugins], State),
+    try
+        route_findings(rebar3_nova_utils:route_table([AppName]))
     catch
         Class:Reason ->
             [
@@ -332,6 +425,23 @@ check_routes(State) ->
                     "Likely a router module error - run `rebar3 compile` and check exports"}
             ]
     end.
+
+-spec route_findings(
+    {ok, nova_routing_trie:trie()} | {error, {invalid_setting, atom(), term()}}
+) -> [finding()].
+route_findings({ok, Dispatch}) ->
+    Routes = collect_route_handlers(Dispatch),
+    HandlerFindings = [check_handler(R) || R <- Routes],
+    DupFinding = check_duplicate_routes(Routes),
+    CountFinding =
+        {ok, io_lib:format("~b routes compiled", [length(Routes)])},
+    [CountFinding | HandlerFindings] ++ DupFinding;
+route_findings({error, {invalid_setting, Setting, Reason}}) ->
+    [
+        {error, rebar3_nova_utils:invalid_setting_message(Setting, Reason),
+            "Nova refuses to start with these routes. The setting is in a route group of the "
+            "router or under {nova, [...]} in sys.config"}
+    ].
 
 collect_route_handlers(Dispatch) ->
     [extract_handler(Route) || Route <- rebar3_nova_dispatch:routes(Dispatch)].
