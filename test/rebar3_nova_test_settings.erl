@@ -15,6 +15,8 @@ checked(non_canonical_paths, Value) when Value =:= reject; Value =:= resolve ->
     {ok, Value};
 checked(max_sessions, Value) when is_integer(Value), Value > 0 ->
     {ok, Value};
+checked(server_grace, Value) when Value =:= infinity; is_integer(Value), Value >= 0 ->
+    {ok, Value};
 checked(plugins_before_security, Value) when Value =:= all; Value =:= [] ->
     {ok, Value};
 checked(secret_key_base, undefined) ->

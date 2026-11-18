@@ -280,6 +280,7 @@ With a Nova later than 0.18 in the project, the settings that Nova checks when i
     secret_key_base           set (not shown)
     max_sessions              1000000 (default)
     plugins_before_security   [] (default)
+    server_grace              10000 (default)
 ```
 
 The value of `secret_key_base` is never printed. A setting that Nova no longer has and does not start with is listed with the one to use instead.
@@ -366,7 +367,7 @@ Summary: 67 ok, 2 warning(s), 0 error(s)
 |---------|--------|
 | `toolchain` | OTP version, rebar3 version, `.tool-versions` or `mise.toml` pinning |
 | `project` | `bootstrap_application` set, the router (`router_module` or `<app>_router`) exports `routes/1`, `.app.src` lists `nova` in `applications` |
-| `config` | `json_lib` (read from the bootstrap app) is loaded and exports `encode/1` and `decode/1`; `{json_lib, json}` is an error with a Nova whose request decoding expects `{ok, Term}`; `json_lib` set under `nova`; Cowboy port; `session_manager`, `use_sessions`, and the unused `session_backend` key. With a Nova later than 0.18: an unset `environment` (read as `prod`), and the settings that Nova checks when it starts (`non_canonical_paths`, `trusted_origins`, `csrf_token`, `secret_key_base`, `max_sessions`, `plugins_before_security`), checked by the project's Nova itself, so a value it does not start with is an error here; a setting it no longer has; `{csrf_token, stateless}` without `secret_key_base`; one of them set under the bootstrap app, where Nova does not read it. The value of `secret_key_base` is in no finding |
+| `config` | `json_lib` (read from the bootstrap app) is loaded and exports `encode/1` and `decode/1`; `{json_lib, json}` is an error with a Nova whose request decoding expects `{ok, Term}`; `json_lib` set under `nova`; Cowboy port; `session_manager`, `use_sessions`, and the unused `session_backend` key. With a Nova later than 0.18: an unset `environment` (read as `prod`), and the settings that Nova checks when it starts (`non_canonical_paths`, `trusted_origins`, `csrf_token`, `secret_key_base`, `max_sessions`, `plugins_before_security`, `server_grace`), checked by the project's Nova itself, so a value it does not start with is an error here; a setting it no longer has; `{csrf_token, stateless}` without `secret_key_base`; one of them set under the bootstrap app, where Nova does not read it. The value of `secret_key_base` is in no finding |
 | `routes` | Every compiled route resolves to an exported handler (or captured fun); flags duplicate `{method, path}` pairs; names a route group setting that Nova refuses to compile the routes with |
 | `deps` | `rebar.lock` committed, active profiles |
 | `security` | `erl_crash.dump` and `.env` presence vs `.gitignore` (asked of `git check-ignore` in a git repository; otherwise a whole `.gitignore` line, so `.envrc` does not count), and a literal `-setcookie` in `config/vm.args(.src)` (a warning, so projects from 0.13.4 and earlier still pass) |

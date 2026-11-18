@@ -142,7 +142,8 @@ config_lists_the_settings_nova_checks(_Config) ->
     ?assertEqual({default, undefined}, proplists:get_value(csrf_token, Nova)),
     ?assertEqual({default, undefined}, proplists:get_value(secret_key_base, Nova)),
     ?assertEqual({default, 1000000}, proplists:get_value(max_sessions, Nova)),
-    ?assertEqual({default, []}, proplists:get_value(plugins_before_security, Nova)).
+    ?assertEqual({default, []}, proplists:get_value(plugins_before_security, Nova)),
+    ?assertEqual({default, 10000}, proplists:get_value(server_grace, Nova)).
 
 config_leaves_checked_settings_out_for_a_nova_without_them(_Config) ->
     Config = [{nova, [{trusted_origins, same_origin}, {csrf_secret, ?SECRET}]}],
