@@ -22,6 +22,7 @@
 
 -define(PROVIDER, serve).
 -define(DEPS, [{default, compile}]).
+-define(RELOAD_TRIES, 3).
 
 %% ===================================================================
 %% Public API
@@ -254,10 +255,34 @@ compiled_apps() ->
     end.
 
 reload_app(App, Prefix) ->
-    ok = nova_router:remove_application(App),
-    _ = nova_router:compile([{App, app_options(App, Prefix)}]),
-    rebar_api:info("Reloaded routes for ~p", [App]),
+    try
+        ok = nova_router:remove_application(App),
+        ok = compile_routes(App, app_options(App, Prefix), ?RELOAD_TRIES)
+    catch
+        %% Nova 1.0 raises this while the listener of the table is started
+        %% again, which compiles the routes of the application by itself.
+        error:{routing_table_replaced, _DispatchKey} ->
+            rebar_api:info("Routes for ~p are compiled as its listener starts", [App])
+    end,
     App.
+
+%% Nova 1.0 raises routing_table_changed when routes were stored into the
+%% table as the router ran. The application is out of the table by then, so
+%% it is compiled again into the table as it is.
+compile_routes(App, Options, Tries) ->
+    try nova_router:compile([{App, Options}]) of
+        _Dispatch ->
+            rebar_api:info("Reloaded routes for ~p", [App])
+    catch
+        error:{routing_table_changed, _DispatchKey} when Tries > 1 ->
+            compile_routes(App, Options, Tries - 1);
+        error:{routing_table_changed, _DispatchKey} ->
+            rebar_api:warn(
+                "Routes for ~p are not reloaded: the routing table changed each time they were "
+                "compiled. Save the router again",
+                [App]
+            )
+    end.
 
 %% An app listed in nova_apps is compiled with the options of its entry there
 %% (prefix, secure, plugins, plugin_strategy, ...), found the way Nova

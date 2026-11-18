@@ -14,7 +14,9 @@
     prefixed_app_keeps_its_prefix/1,
     other_modules_leave_routes_alone/1,
     nova_apps_options_survive_a_reload/1,
-    nested_nova_apps_options_survive_a_reload/1
+    nested_nova_apps_options_survive_a_reload/1,
+    changed_table/1,
+    table_being_built/1
 ]).
 
 -define(APP, rebar3_nova).
@@ -32,7 +34,9 @@ all() ->
         prefixed_app_keeps_its_prefix,
         other_modules_leave_routes_alone,
         nova_apps_options_survive_a_reload,
-        nested_nova_apps_options_survive_a_reload
+        nested_nova_apps_options_survive_a_reload,
+        changed_table,
+        table_being_built
     ].
 
 init_per_testcase(_Case, Config) ->
@@ -90,6 +94,66 @@ router_edit_reloads_routes(_Config) ->
 
     ?assertMatch({ok, _, _}, nova_router:lookup_url('_', ~"/new", ~"GET")),
     ?assertMatch({error, _}, nova_router:lookup_url('_', ~"/old", ~"GET")).
+
+%% Nova 1.0 refuses a compile when routes were stored into the table as the
+%% router ran. The routes of the application are out of the table by then,
+%% so they are compiled again.
+changed_table(_Config) ->
+    Test = self(),
+    Old = [#{routes => [{"/old", fun test_controller:old/1, #{methods => [get]}}]}],
+    New = [#{routes => [{"/new", fun test_controller:new/1, #{methods => [get]}}]}],
+    Side = #{prefix => "/side", routes => [{"/", fun test_controller:a/1, #{methods => [get]}}]},
+    ?ROUTER:set_routes(Old),
+    _ = nova_router:compile_fresh([?APP], nova_dispatch),
+    ?ROUTER:set_routes(fun(_Env) ->
+        case put(?FUNCTION_NAME, ran) of
+            undefined ->
+                _ = spawn(fun() -> Test ! {stored, nova_router:add_routes(other_app, Side)} end),
+                receive
+                    {stored, ok} -> New
+                after 5000 -> error(not_stored)
+                end;
+            ran ->
+                New
+        end
+    end),
+    try
+        ?assertEqual([?APP], rebar3_nova_serve:reload_routes(?ROUTER))
+    after
+        erase(?FUNCTION_NAME)
+    end,
+    ?assertMatch({ok, _, _}, nova_router:lookup_url('_', ~"/new", ~"GET")),
+    ?assertMatch({ok, _, _}, nova_router:lookup_url('_', ~"/side/", ~"GET")),
+    ?assertMatch({error, _}, nova_router:lookup_url('_', ~"/old", ~"GET")).
+
+%% While the listener of the table is started again, Nova 1.0 refuses to
+%% take an application out of the table before it. The start compiles the
+%% routes of the application itself, so the reload leaves them to it.
+table_being_built(_Config) ->
+    Test = self(),
+    Old = [#{routes => [{"/old", fun test_controller:old/1, #{methods => [get]}}]}],
+    Built = [#{routes => [{"/built", fun test_controller:new/1, #{methods => [get]}}]}],
+    ?ROUTER:set_routes(Old),
+    _ = nova_router:compile_fresh([?APP], nova_dispatch),
+    ?ROUTER:set_routes(fun(_Env) ->
+        Test ! building,
+        receive
+            go -> Built
+        after 5000 -> error(not_let_go)
+        end
+    end),
+    {Builder, Monitor} = spawn_monitor(fun() -> nova_router:compile_fresh([?APP], nova_dispatch) end),
+    receive
+        building -> ok
+    after 5000 -> error(not_building)
+    end,
+    ?assertEqual([?APP], rebar3_nova_serve:reload_routes(?ROUTER)),
+    Builder ! go,
+    receive
+        {'DOWN', Monitor, process, Builder, Reason} -> ?assertEqual(normal, Reason)
+    after 5000 -> error(not_built)
+    end,
+    ?assertMatch({ok, _, _}, nova_router:lookup_url('_', ~"/built", ~"GET")).
 
 prefixed_app_keeps_its_prefix(_Config) ->
     ?ROUTER:set_routes([#{routes => [{"/a", fun test_controller:a/1, #{methods => [get]}}]}]),
