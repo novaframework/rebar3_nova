@@ -61,7 +61,7 @@ Releases keep distribution private by default: the node is named `my_app@localho
 
 With `--kura` or `--pgo`, the prod config connects to PostgreSQL over TLS, verifying the server certificate against the OS trust store (for `--pgo`, `/etc/ssl/certs/ca-certificates.crt` and a `DATABASE_HOST` that is a host name); set `DATABASE_SSL=false` (`DB_SSL` in `nova_fullstack`) only for a database on the same host or a private network. The `--docker` image runs as an unprivileged `app` user that can write only `log` and the configs rendered into `releases/<vsn>` (the release itself stays owned by root), needs `RELEASE_COOKIE` at run time, and `SECRET_KEY_BASE` with a Nova later than 0.18 (`docker run -e RELEASE_COOKIE="$(openssl rand -hex 32)" -e SECRET_KEY_BASE="$(openssl rand -base64 48)" -p 8080:8080 <image>`), its base images are pinned by digest, and a `.dockerignore` keeps `_build`, `.git` and `.env` out of the build context. The development `docker-compose.yml` publishes PostgreSQL on `127.0.0.1` only.
 
-Generated projects target OTP 29 and rebar3 3.27 (`.tool-versions`), depend on `{nova, "~> 0.18"}` and list `{rebar3_nova, "~> 0.13"}` as a project plugin.
+Generated projects target OTP 29 and rebar3 3.27 (`.tool-versions`), depend on `{nova, "~> 1.0"}` with the `{nova_cowboy, "~> 1.0"}` server package, and list `{rebar3_nova, "~> 0.13"}` as a project plugin.
 
 ## Commands
 
@@ -75,7 +75,7 @@ $ rebar3 nova serve
 
 File watching uses the [fs](https://hex.pm/packages/fs) library. On Linux and the BSDs it needs `inotifywait` from inotify-tools (`apt install inotify-tools`, `dnf install inotify-tools`, `pacman -S inotify-tools`). Without it, serve prints a warning and runs without reloading.
 
-The commands that read routes (`routes`, `audit`, `openapi`, `doctor`, `gen_test`) build the route table with the project's own Nova, which must be 0.18 or later.
+The commands that read routes (`routes`, `audit`, `openapi`, `doctor`, `gen_test`) build the route table with the project's own Nova, which must be 0.18 or later. Nova 0.18 and 1.0 are both read.
 
 ### `nova routes` — List compiled routes
 
@@ -256,7 +256,7 @@ $ rebar3 nova config
   {nova, [...]}
     bootstrap_application     myapp
     environment               dev
-    cowboy_configuration      #{port => 8080}
+    listeners                 #{web => #{port => 8080}}
     plugins                   [] (default)
     use_stacktrace            false (default)
     render_error_pages        true (default)
@@ -288,7 +288,7 @@ The value of `secret_key_base` is never printed. A setting that Nova no longer h
 
 Checks compiled routes for common security issues and prints findings grouped by severity. The routes are those of the application and of the `nova_apps` declared for it in sys.config (nested ones included), compiled for one Nova environment, so routes that `routes(prod)` returns are audited with `--env prod`. The first line of the report says what was audited, what was not and which config `nova_apps` came from. `nova_apps` are read from the shell config unless `--config` names another; with an `--env` other than `dev` and no `--config`, the report notes that the dev config was used. A `.config.src` works: `${VAR}` and `${VAR:-Default}` are replaced from the environment or the default before it is read, as relx does. The audit sets the Nova environment and the `router_module`s from the config only while it compiles the routes.
 
-`audit` and `openapi` read Nova's route records as nova 0.18.1 defines them. A route whose handler they do not recognise, as a later nova that changes those records would cause, is left out of the report and named in a warning; upgrade rebar3_nova when you see one.
+`audit` and `openapi` read Nova's route records as nova 0.18 and 1.0 define them. A route whose handler they do not recognise, as a later nova that changes those records would cause, is left out of the report and named in a warning; upgrade rebar3_nova when you see one.
 
 ```
 $ rebar3 nova audit --env prod --config config/prod_sys.config.src
@@ -322,7 +322,7 @@ $ rebar3 nova audit --env prod --config config/prod_sys.config.src
 - **Warning**: Wildcard method (`'_'`) matching all HTTP methods on a route (once per route)
 - **Info**: GET routes without a security callback
 
-Static file routes, error pages, websocket and other cowboy handlers, and routes served outside `nova_router` (such as `arizona_nova` routes) are not audited; the coverage line names them. Findings are sorted by path and method.
+Static file routes, error pages, websocket and other handler modules, and routes served outside `nova_router` (such as `arizona_nova` routes) are not audited; the coverage line names them. Findings are sorted by path and method.
 
 ### `nova doctor` — Diagnose project health
 

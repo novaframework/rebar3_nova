@@ -166,8 +166,8 @@ rebar_erlydtl_opts(_) ->
 rebar_deps(Flags) ->
     BaseDeps =
         case maps:get(lfe, Flags) of
-            true -> ["    {nova, \"~> 0.18\"},\n", "    {logjam, \"1.2.4\"}"];
-            false -> ["    {nova, \"~> 0.18\"},\n", "    {flatlog, \"0.1.2\"}"]
+            true -> [nova_deps(), "    {logjam, \"1.2.4\"}"];
+            false -> [nova_deps(), "    {flatlog, \"0.1.2\"}"]
         end,
     KuraDep =
         case maps:get(kura, Flags) of
@@ -202,6 +202,10 @@ rebar_deps(Flags) ->
                 []
         end,
     ["{deps, [\n", BaseDeps, KuraDep, PgoDep, ArizonaDeps, LfeDep, OtelDeps, "\n]}.\n\n"].
+
+%% Nova and the server package it runs on.
+nova_deps() ->
+    "    {nova, \"~> 1.0\"},\n    {nova_cowboy, \"~> 1.0\"},\n".
 
 rebar_relx(Name, _Flags) ->
     [
@@ -398,7 +402,9 @@ app_src_applications(Flags) ->
             false ->
                 []
         end,
-    [Base, Kura, Pgo, Arizona, Otel].
+    %% The server package starts the listeners, so it comes after what a
+    %% request needs.
+    [Base, Kura, Pgo, Arizona, Otel, ",\n        nova_cowboy"].
 
 %%======================================================================
 %% app.erl / app.lfe
@@ -729,10 +735,12 @@ sys_config_nova(Name, Env, Flags) ->
         EnvName,
         "},\n",
         sys_config_secret(Env),
-        "     {cowboy_configuration, #{\n",
-        "         port => 8080",
-        sys_config_middlewares(Flags),
+        "     {listeners, #{\n",
+        "         web => #{\n",
+        "             port => 8080",
+        sys_config_steps(Flags),
         "\n",
+        "         }\n",
         "     }},\n",
         "     {bootstrap_application, ",
         Name,
@@ -754,20 +762,20 @@ sys_config_secret(prod) ->
         "     {secret_key_base, <<\"${SECRET_KEY_BASE}\">>},\n"
     ].
 
-sys_config_middlewares(#{arizona := true}) ->
+sys_config_steps(#{arizona := true}) ->
     [
         ",\n",
-        "         %% arizona_nova:middlewares() spelled out: sys.config only takes terms.\n",
-        "         middleware_handlers => [\n",
-        "             arizona_cowboy_middleware,\n",
-        "             nova_router,\n",
-        "             nova_plugin_handler,\n",
-        "             nova_security_handler,\n",
-        "             nova_handler,\n",
-        "             nova_plugin_handler\n",
-        "         ]"
+        "             %% arizona_nova:middlewares() spelled out: sys.config only takes terms.\n",
+        "             steps => [\n",
+        "                 arizona_cowboy_middleware,\n",
+        "                 nova_router,\n",
+        "                 nova_plugin_handler,\n",
+        "                 nova_security_handler,\n",
+        "                 nova_handler,\n",
+        "                 nova_plugin_handler\n",
+        "             ]"
     ];
-sys_config_middlewares(_Flags) ->
+sys_config_steps(_Flags) ->
     [].
 
 sys_config_db(Name, dev, #{kura := true}) ->

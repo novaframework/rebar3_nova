@@ -230,8 +230,8 @@ arizona_flag(_Config) ->
     ],
     {ok, [DevTerms]} = file:consult(filename:join([Name, "config", "dev_sys.config.src"])),
     ?assertEqual(undefined, prop(arizona_core, DevTerms)),
-    #{middleware_handlers := [arizona_cowboy_middleware, nova_router | _]} =
-        prop(cowboy_configuration, prop(nova, DevTerms)),
+    #{web := #{port := 8080, steps := [arizona_cowboy_middleware, nova_router | _]}} =
+        prop(listeners, prop(nova, DevTerms)),
     Routes = prop(routes, prop(arizona_nova, DevTerms)),
     ?assertMatch(
         {live, <<"/">>, testapp_arizona_home_live, #{layouts := [{testapp_arizona_layout, render}]}},
@@ -446,7 +446,8 @@ current_toolchain(_Config) ->
     ?assertNot(lists:member("_*", GitIgnore)),
     ?assert(lists:member("_build", GitIgnore)),
     Terms = consult_rebar_config(Name),
-    ?assertEqual({nova, "~> 0.18"}, lists:keyfind(nova, 1, prop(deps, Terms))),
+    ?assertEqual({nova, "~> 1.0"}, lists:keyfind(nova, 1, prop(deps, Terms))),
+    ?assertEqual({nova_cowboy, "~> 1.0"}, lists:keyfind(nova_cowboy, 1, prop(deps, Terms))),
     ?assertEqual(
         {rebar3_nova, "~> 0.13"},
         lists:keyfind(rebar3_nova, 1, prop(project_plugins, Terms))
