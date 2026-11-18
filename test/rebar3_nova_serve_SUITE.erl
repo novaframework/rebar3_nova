@@ -16,6 +16,7 @@
     nova_apps_options_survive_a_reload/1,
     nested_nova_apps_options_survive_a_reload/1,
     changed_table/1,
+    gave_up/1,
     table_being_built/1
 ]).
 
@@ -36,6 +37,7 @@ all() ->
         nova_apps_options_survive_a_reload,
         nested_nova_apps_options_survive_a_reload,
         changed_table,
+        gave_up,
         table_being_built
     ].
 
@@ -99,7 +101,6 @@ router_edit_reloads_routes(_Config) ->
 %% router ran. The routes of the application are out of the table by then,
 %% so they are compiled again.
 changed_table(_Config) ->
-    Test = self(),
     Old = [#{routes => [{"/old", fun test_controller:old/1, #{methods => [get]}}]}],
     New = [#{routes => [{"/new", fun test_controller:new/1, #{methods => [get]}}]}],
     Side = #{prefix => "/side", routes => [{"/", fun test_controller:a/1, #{methods => [get]}}]},
@@ -108,11 +109,8 @@ changed_table(_Config) ->
     ?ROUTER:set_routes(fun(_Env) ->
         case put(?FUNCTION_NAME, ran) of
             undefined ->
-                _ = spawn(fun() -> Test ! {stored, nova_router:add_routes(other_app, Side)} end),
-                receive
-                    {stored, ok} -> New
-                after 5000 -> error(not_stored)
-                end;
+                ok = stored(other_app, Side),
+                New;
             ran ->
                 New
         end
@@ -125,6 +123,52 @@ changed_table(_Config) ->
     ?assertMatch({ok, _, _}, nova_router:lookup_url('_', ~"/new", ~"GET")),
     ?assertMatch({ok, _, _}, nova_router:lookup_url('_', ~"/side/", ~"GET")),
     ?assertMatch({error, _}, nova_router:lookup_url('_', ~"/old", ~"GET")).
+
+%% A table that changes each time the routes are compiled is given up on.
+%% The routes of the application are out of it by then, and a warning
+%% says so.
+gave_up(_Config) ->
+    Old = [#{routes => [{"/old", fun test_controller:old/1, #{methods => [get]}}]}],
+    New = [#{routes => [{"/new", fun test_controller:new/1, #{methods => [get]}}]}],
+    Side = fun(N) ->
+        #{
+            prefix => "/side" ++ integer_to_list(N),
+            routes => [{"/", fun test_controller:a/1, #{methods => [get]}}]
+        }
+    end,
+    ?ROUTER:set_routes(Old),
+    _ = nova_router:compile_fresh([?APP], nova_dispatch),
+    ?ROUTER:set_routes(fun(_Env) ->
+        Ran =
+            case get(?FUNCTION_NAME) of
+                undefined -> 1;
+                Before -> Before + 1
+            end,
+        put(?FUNCTION_NAME, Ran),
+        ok = stored(other_app, Side(Ran)),
+        New
+    end),
+    try
+        ?assertEqual([?APP], rebar3_nova_serve:reload_routes(?ROUTER)),
+        ?assertEqual(3, get(?FUNCTION_NAME))
+    after
+        erase(?FUNCTION_NAME)
+    end,
+    ?assertMatch({error, _}, nova_router:lookup_url('_', ~"/new", ~"GET")),
+    ?assertMatch({error, _}, nova_router:lookup_url('_', ~"/old", ~"GET")),
+    ?assertMatch({ok, _, _}, nova_router:lookup_url('_', ~"/side3/", ~"GET")).
+
+%% A router does not store into the table it is compiled into, so what is
+%% stored as it runs is stored by another process.
+stored(App, Routes) ->
+    {Storing, Monitor} = spawn_monitor(fun() ->
+        exit({stored, nova_router:add_routes(App, Routes)})
+    end),
+    receive
+        {'DOWN', Monitor, process, Storing, {stored, Stored}} -> Stored;
+        {'DOWN', Monitor, process, Storing, NotStored} -> error(NotStored)
+    after 5000 -> error(not_stored)
+    end.
 
 %% While the listener of the table is started again, Nova 1.0 refuses to
 %% take an application out of the table before it. The start compiles the

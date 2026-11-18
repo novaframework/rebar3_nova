@@ -272,16 +272,18 @@ reload_app(App, Prefix) ->
 compile_routes(App, Options, Tries) ->
     try nova_router:compile([{App, Options}]) of
         _Dispatch ->
-            rebar_api:info("Reloaded routes for ~p", [App])
+            rebar_api:info("Reloaded routes for ~p", [App]),
+            ok
     catch
         error:{routing_table_changed, _DispatchKey} when Tries > 1 ->
             compile_routes(App, Options, Tries - 1);
         error:{routing_table_changed, _DispatchKey} ->
             rebar_api:warn(
-                "Routes for ~p are not reloaded: the routing table changed each time they were "
+                "Routes for ~p are not served: the routing table changed each time they were "
                 "compiled. Save the router again",
                 [App]
-            )
+            ),
+            ok
     end.
 
 %% An app listed in nova_apps is compiled with the options of its entry there
