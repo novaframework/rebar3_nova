@@ -38,7 +38,8 @@
     epmd_address_is_documented/1,
     prod_config_reads_the_secret_from_the_environment/1,
     docker_run_names_the_secret/1,
-    plugin_template_has_the_callbacks_nova_calls/1
+    plugin_template_has_the_callbacks_nova_calls/1,
+    websocket_template/1
 ]).
 
 all() ->
@@ -76,7 +77,8 @@ all() ->
         epmd_address_is_documented,
         prod_config_reads_the_secret_from_the_environment,
         docker_run_names_the_secret,
-        plugin_template_has_the_callbacks_nova_calls
+        plugin_template_has_the_callbacks_nova_calls,
+        websocket_template
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -852,6 +854,31 @@ consult_string(Bin) ->
     Path = "substituted.config",
     ok = file:write_file(Path, Substituted),
     file:consult(Path).
+
+%% The template exported a callback it did not define, and was written to
+%% the view of another template.
+websocket_template(_Config) ->
+    assert_contains(
+        read_file(templates_dir(), "nova_websocket.template"),
+        "{template, \"nova/websocket.erl\", \"src/controllers/{{name}}_ws_controller.erl\"}"
+    ),
+    Source = string:replace(
+        read_file(templates_dir(), "nova/websocket.erl"), "{{name}}", "my", all
+    ),
+    ok = file:write_file("my_ws_controller.erl", Source),
+    {ok, my_ws_controller, Beam, []} =
+        compile:file("my_ws_controller.erl", [binary, return, warnings_as_errors]),
+    {module, my_ws_controller} = code:load_binary(my_ws_controller, "my_ws_controller.erl", Beam),
+    try
+        ?assertEqual({ok, #{}}, my_ws_controller:init(#{})),
+        ?assertEqual({ok, #{}}, my_ws_controller:websocket_init(#{})),
+        ?assertEqual({ok, #{}}, my_ws_controller:websocket_handle({text, <<"hi">>}, #{})),
+        ?assertEqual({ok, #{}}, my_ws_controller:websocket_info(hi, #{})),
+        ?assertEqual(ok, my_ws_controller:terminate(normal, #{}, #{}))
+    after
+        code:purge(my_ws_controller),
+        code:delete(my_ws_controller)
+    end.
 
 default_flags() ->
     #{

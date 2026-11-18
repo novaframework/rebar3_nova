@@ -1,6 +1,6 @@
-{description, "Nova websocket module"}.
+{description, "Nova WebSocket controller"}.
 {variables, [
-    {modname, "Module name"}
+    {name, "my", "Name of the controller, without _ws_controller"}
 ]}.
 
-{file, "nova/websocket.erl", "{{name}}/src/views/{{name}}_main.dtl"}.
+{template, "nova/websocket.erl", "src/controllers/{{name}}_ws_controller.erl"}.
