@@ -259,5 +259,6 @@ checked_settings() ->
         {csrf_token, undefined},
         {secret_key_base, undefined},
         {max_sessions, 1000000},
-        {plugins_before_security, []}
+        {plugins_before_security, []},
+        {server_grace, 10000}
     ].

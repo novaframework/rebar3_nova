@@ -17,6 +17,8 @@
     template_erlydtl_provider_hooks/1,
     combined_kura_arizona_ci/1,
     kura_pgo_mutually_exclusive/1,
+    roadrunner_project/1,
+    roadrunner_exclusive/1,
     existing_dir_aborts/1,
     sys_configs_are_valid_terms/1,
     dev_logger_uses_flatlog_handler/1,
@@ -38,7 +40,8 @@
     epmd_address_is_documented/1,
     prod_config_reads_the_secret_from_the_environment/1,
     docker_run_names_the_secret/1,
-    plugin_template_has_the_callbacks_nova_calls/1
+    plugin_template_has_the_callbacks_nova_calls/1,
+    websocket_template/1
 ]).
 
 all() ->
@@ -55,6 +58,8 @@ all() ->
         template_erlydtl_provider_hooks,
         combined_kura_arizona_ci,
         kura_pgo_mutually_exclusive,
+        roadrunner_project,
+        roadrunner_exclusive,
         existing_dir_aborts,
         sys_configs_are_valid_terms,
         dev_logger_uses_flatlog_handler,
@@ -76,7 +81,8 @@ all() ->
         epmd_address_is_documented,
         prod_config_reads_the_secret_from_the_environment,
         docker_run_names_the_secret,
-        plugin_template_has_the_callbacks_nova_calls
+        plugin_template_has_the_callbacks_nova_calls,
+        websocket_template
     ].
 
 init_per_testcase(_TC, Config) ->
@@ -230,8 +236,8 @@ arizona_flag(_Config) ->
     ],
     {ok, [DevTerms]} = file:consult(filename:join([Name, "config", "dev_sys.config.src"])),
     ?assertEqual(undefined, prop(arizona_core, DevTerms)),
-    #{middleware_handlers := [arizona_cowboy_middleware, nova_router | _]} =
-        prop(cowboy_configuration, prop(nova, DevTerms)),
+    #{web := #{port := 8080, steps := [arizona_cowboy_middleware, nova_router | _]}} =
+        prop(listeners, prop(nova, DevTerms)),
     Routes = prop(routes, prop(arizona_nova, DevTerms)),
     ?assertMatch(
         {live, <<"/">>, testapp_arizona_home_live, #{layouts := [{testapp_arizona_layout, render}]}},
@@ -385,6 +391,31 @@ kura_pgo_mutually_exclusive(_Config) ->
     ?assertMatch({error, _}, rebar3_nova_new:validate_flags(Flags)),
     ok.
 
+%% A project has one server package: the one it depends on is the one its
+%% application starts.
+roadrunner_project(_Config) ->
+    Name = "testapp_roadrunner",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{roadrunner => true}),
+    Deps = prop(deps, consult_rebar_config(Name)),
+    ?assertEqual({nova, "~> 1.0"}, lists:keyfind(nova, 1, Deps)),
+    ?assertEqual({nova_roadrunner, "~> 1.0"}, lists:keyfind(nova_roadrunner, 1, Deps)),
+    ?assertEqual(false, lists:keyfind(nova_cowboy, 1, Deps)),
+    {ok, [{application, testapp_roadrunner, App}]} =
+        file:consult(filename:join([Name, "src", "testapp_roadrunner.app.src"])),
+    ?assertEqual(nova_roadrunner, lists:last(prop(applications, App))),
+    ?assertNot(lists:member(nova_cowboy, prop(applications, App))),
+    {ok, [DevTerms]} = file:consult(filename:join([Name, "config", "dev_sys.config.src"])),
+    ?assertEqual(#{web => #{port => 8080}}, prop(listeners, prop(nova, DevTerms))).
+
+roadrunner_exclusive(_Config) ->
+    Roadrunner = (default_flags())#{roadrunner => true},
+    ?assertEqual(ok, rebar3_nova_new:validate_flags(Roadrunner)),
+    ?assertEqual(
+        ok, rebar3_nova_new:validate_flags(Roadrunner#{kura => true, docker => true, lfe => true})
+    ),
+    ?assertMatch({error, _}, rebar3_nova_new:validate_flags(Roadrunner#{arizona => true})),
+    ?assertMatch({error, _}, rebar3_nova_new:validate_flags(Roadrunner#{otel => true})).
+
 existing_dir_aborts(_Config) ->
     Name = "testapp_exists",
     ok = file:make_dir(Name),
@@ -446,7 +477,8 @@ current_toolchain(_Config) ->
     ?assertNot(lists:member("_*", GitIgnore)),
     ?assert(lists:member("_build", GitIgnore)),
     Terms = consult_rebar_config(Name),
-    ?assertEqual({nova, "~> 0.18"}, lists:keyfind(nova, 1, prop(deps, Terms))),
+    ?assertEqual({nova, "~> 1.0"}, lists:keyfind(nova, 1, prop(deps, Terms))),
+    ?assertEqual({nova_cowboy, "~> 1.0"}, lists:keyfind(nova_cowboy, 1, prop(deps, Terms))),
     ?assertEqual(
         {rebar3_nova, "~> 0.13"},
         lists:keyfind(rebar3_nova, 1, prop(project_plugins, Terms))
@@ -852,6 +884,31 @@ consult_string(Bin) ->
     ok = file:write_file(Path, Substituted),
     file:consult(Path).
 
+%% The template exported a callback it did not define, and was written to
+%% the view of another template.
+websocket_template(_Config) ->
+    assert_contains(
+        read_file(templates_dir(), "nova_websocket.template"),
+        "{template, \"nova/websocket.erl\", \"src/controllers/{{name}}_ws_controller.erl\"}"
+    ),
+    Source = string:replace(
+        read_file(templates_dir(), "nova/websocket.erl"), "{{name}}", "my", all
+    ),
+    ok = file:write_file("my_ws_controller.erl", Source),
+    {ok, my_ws_controller, Beam, []} =
+        compile:file("my_ws_controller.erl", [binary, return, warnings_as_errors]),
+    {module, my_ws_controller} = code:load_binary(my_ws_controller, "my_ws_controller.erl", Beam),
+    try
+        ?assertEqual({ok, #{}}, my_ws_controller:init(#{})),
+        ?assertEqual({ok, #{}}, my_ws_controller:websocket_init(#{})),
+        ?assertEqual({ok, #{}}, my_ws_controller:websocket_handle({text, <<"hi">>}, #{})),
+        ?assertEqual({ok, #{}}, my_ws_controller:websocket_info(hi, #{})),
+        ?assertEqual(ok, my_ws_controller:terminate(normal, #{}, #{}))
+    after
+        code:purge(my_ws_controller),
+        code:delete(my_ws_controller)
+    end.
+
 default_flags() ->
     #{
         kura => false,
@@ -860,7 +917,8 @@ default_flags() ->
         lfe => false,
         ci => false,
         docker => false,
-        otel => false
+        otel => false,
+        roadrunner => false
     }.
 
 assert_file_exists(Base, RelPath) ->

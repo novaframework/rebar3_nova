@@ -29,6 +29,7 @@
     openapi_component_name_collision_is_an_error/1,
     openapi_unknown_schema_gets_no_ref/1,
     openapi_default_output_is_the_assets_dir/1,
+    record_shapes/1,
     unrecognised_handlers_are_reported/1,
     audit_compiles_the_requested_environment/1,
     audit_covers_the_nova_apps_in_the_config/1,
@@ -65,6 +66,7 @@ all() ->
         openapi_component_name_collision_is_an_error,
         openapi_unknown_schema_gets_no_ref,
         openapi_default_output_is_the_assets_dir,
+        record_shapes,
         unrecognised_handlers_are_reported,
         audit_compiles_the_requested_environment,
         audit_covers_the_nova_apps_in_the_config,
@@ -424,6 +426,51 @@ collect_output(Ref, Acc) ->
 %% As before 0.14: the scaffold serves priv/assets under /assets.
 openapi_default_output_is_the_assets_dir(_Config) ->
     ?assertEqual("/app/priv/assets/openapi.json", rebar3_nova_openapi:default_output("/app")).
+
+%% Nova 1.0 added a field to its handler records and renamed one of them. A
+%% table of either Nova is read.
+record_shapes(_Config) ->
+    Callback = fun test_controller:a/1,
+    Before = {nova_handler_value, test_app, undefined, undefined, Callback, [], false, undefined},
+    Now =
+        {nova_handler_value, test_app, undefined, undefined, Callback, [], false, undefined, [
+            http2
+        ]},
+    SocketBefore = {cowboy_handler_value, test_app, nova_ws_handler, #{}, [], false},
+    SocketNow = {nova_module_value, test_app, nova_ws_handler, #{}, [], false, undefined},
+    Trie = trie(
+        [
+            {~"/before", Before},
+            {~"/now", Now},
+            {~"/ws-before", SocketBefore},
+            {~"/ws-now", SocketNow}
+        ],
+        nova_routing_trie:new()
+    ),
+    Routes = rebar3_nova_dispatch:routes(Trie),
+    ?assertEqual([], rebar3_nova_dispatch:unknown_routes(Routes)),
+    ?assertEqual(
+        [
+            {~"/before", {controller, test_controller, a}},
+            {~"/now", {controller, test_controller, a}},
+            {~"/ws-before", {module, nova_ws_handler}},
+            {~"/ws-now", {module, nova_ws_handler}}
+        ],
+        lists:sort([{Path, rebar3_nova_dispatch:handler(Value)} || {Path, _Method, Value} <- Routes])
+    ),
+    ?assertEqual(
+        [~"/before", ~"/now"],
+        lists:sort([
+            Path
+         || {Path, _Method, _Secure, _Module, _Any} <- rebar3_nova_audit:collect_routes(Trie)
+        ])
+    ).
+
+trie([], Trie) ->
+    Trie;
+trie([{Path, Value} | Rest], Trie) ->
+    {ok, Next} = nova_routing_trie:insert(Path, ~"GET", Value, Trie),
+    trie(Rest, Next).
 
 %% A nova that reshapes its handler records makes routes unknown, and the
 %% tasks would drop them without a word.

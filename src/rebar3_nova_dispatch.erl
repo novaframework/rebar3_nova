@@ -12,6 +12,7 @@
 
 -export([
     routes/1,
+    payload/1,
     handler/1,
     unknown_routes/1,
     warn_unknown/1,
@@ -25,7 +26,7 @@
 -type handler() ::
     {controller, module(), atom()}
     | {anonymous, module()}
-    | {cowboy, module()}
+    | {module, module()}
     | static
     | error_page
     | unknown.
@@ -43,10 +44,38 @@
 -spec routes(Dispatch :: nova_routing_trie:trie()) -> [route()].
 routes(Dispatch) ->
     [
-        {Path, Method, Payload}
+        {Path, Method, payload(Payload)}
      || {_Host, Path, Method, Payload} <- nova_routing_trie:routes(Dispatch),
         is_binary(Path)
     ].
+
+-doc """
+The value of a route as `nova_router.hrl` of this plugin has it, whichever
+Nova compiled the table: Nova 1.0 added `http_versions` to both records and
+renamed `cowboy_handler_value` to `nova_module_value`. A value of another
+shape is returned as it is, and its route is `unknown` to `handler/1`.
+""".
+-spec payload(term()) -> term().
+payload({nova_handler_value, App, Module, Function, Callback, Plugins, Secure, ExtraState}) ->
+    #nova_handler_value{
+        app = App,
+        module = Module,
+        function = Function,
+        callback = Callback,
+        plugins = Plugins,
+        secure = Secure,
+        extra_state = ExtraState
+    };
+payload({cowboy_handler_value, App, Handler, Arguments, Plugins, Secure}) ->
+    #nova_module_value{
+        app = App,
+        handler = Handler,
+        arguments = Arguments,
+        plugins = Plugins,
+        secure = Secure
+    };
+payload(Payload) ->
+    Payload.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -62,14 +91,14 @@ handler(#nova_handler_value{module = Module, function = Function}) when
     is_atom(Module), Module =/= undefined, is_atom(Function)
 ->
     module_handler(Module, Function);
-handler(#cowboy_handler_value{handler = Handler}) ->
-    {cowboy, Handler};
+handler(#nova_module_value{handler = Handler}) ->
+    {module, Handler};
 handler(_) ->
     unknown.
 
 -doc """
 The routes whose handler is `unknown`, as `{Path, Method}`. The handler
-records are matched as nova 0.18.1 defines them, so a later nova that
+records are matched as nova 0.18 and 1.0 define them, so a later nova that
 changes them makes its routes unknown here.
 """.
 -spec unknown_routes([route()]) -> [{binary(), '_' | binary()}].

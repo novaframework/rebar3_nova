@@ -11,7 +11,8 @@
         nova,
         kura,
         kura_postgres,
-        arizona_nova
+        arizona_nova,
+        nova_cowboy
     ]},
     {env, []},
     {modules, []},

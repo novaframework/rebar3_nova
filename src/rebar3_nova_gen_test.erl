@@ -96,7 +96,8 @@ generate(AppName, AppDir, Name, Routes) ->
 
 -doc """
 A suite with one case per route. It reads the port from the nova
-`cowboy_configuration` the tests run with, uses `1` for path bindings and
+`listeners` the tests run with, or from `cowboy_configuration` on a Nova
+before 1.0, uses `1` for path bindings and
 sends a body matching the gen_resource schema, so it passes against the
 generated controller as it is.
 """.
@@ -145,8 +146,13 @@ generate_content(SuiteName, AppName, Routes) ->
         "    httpc:request(Method, {url(Path), [], \"application/json\", Body}, [], []).\n"
         "\n"
         "url(Path) ->\n"
-        "    Cowboy = application:get_env(nova, cowboy_configuration, #{}),\n"
-        "    \"http://localhost:\" ++ integer_to_list(maps:get(port, Cowboy, 8080)) ++ Path.\n"
+        "    \"http://localhost:\" ++ integer_to_list(port()) ++ Path.\n"
+        "\n"
+        "%% The port of a listener, or the one of a Nova before 1.0.\n"
+        "port() ->\n"
+        "    Listeners = maps:values(application:get_env(nova, listeners, #{})),\n"
+        "    Legacy = application:get_env(nova, cowboy_configuration, #{}),\n"
+        "    hd([Port || #{port := Port} <- Listeners ++ [Legacy]] ++ [8080]).\n"
     ]).
 
 test_cases(Routes) ->

@@ -13,9 +13,9 @@ Runs ahead of the security callback of the route, for every request to it,
 on a Nova later than 0.18. Nova 0.18 and earlier do not call it. It must not
 read the request body.
 """.
--spec pre_security(Req :: cowboy_req:req(), Env :: any(), Options :: map(), State :: any()) ->
-    {ok, Req0 :: cowboy_req:req(), NewState :: any()}
-    | {stop, Req0 :: cowboy_req:req(), NewState :: any()}
+-spec pre_security(Req :: nova_req:req(), Env :: any(), Options :: map(), State :: any()) ->
+    {ok, Req0 :: nova_req:req(), NewState :: any()}
+    | {stop, Req0 :: nova_req:req(), NewState :: any()}
     | {error, Reason :: term()}.
 pre_security(Req, _Env, _Options, State) ->
     {ok, Req, State}.
@@ -25,17 +25,17 @@ Runs before the controller. Up to Nova 0.18 that is ahead of the security
 callback of the route, on a later Nova once the callback has let the request
 through.
 """.
--spec pre_request(Req :: cowboy_req:req(), Env :: any(), Options :: map(), State :: any()) ->
-    {ok, Req0 :: cowboy_req:req(), NewState :: any()}
-    | {stop, Req0 :: cowboy_req:req(), NewState :: any()}
+-spec pre_request(Req :: nova_req:req(), Env :: any(), Options :: map(), State :: any()) ->
+    {ok, Req0 :: nova_req:req(), NewState :: any()}
+    | {stop, Req0 :: nova_req:req(), NewState :: any()}
     | {error, Reason :: term()}.
 pre_request(Req, _Env, _Options, State) ->
     {ok, Req, State}.
 
 -doc "Runs after the controller has answered.".
--spec post_request(Req :: cowboy_req:req(), Env :: any(), Options :: map(), State :: any()) ->
-    {ok, Req0 :: cowboy_req:req(), NewState :: any()}
-    | {stop, Req0 :: cowboy_req:req(), NewState :: any()}
+-spec post_request(Req :: nova_req:req(), Env :: any(), Options :: map(), State :: any()) ->
+    {ok, Req0 :: nova_req:req(), NewState :: any()}
+    | {stop, Req0 :: nova_req:req(), NewState :: any()}
     | {error, Reason :: term()}.
 post_request(Req, _Env, _Options, State) ->
     {ok, Req, State}.

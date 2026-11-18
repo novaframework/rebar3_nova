@@ -185,6 +185,7 @@ test_suite_is_erlfmt_formatted(_Config) ->
 test_suite_reads_the_port_at_runtime(_Config) ->
     Source = suite_source(),
     ?assertEqual(nomatch, string:find(Source, ~"8080/")),
+    ?assertNotEqual(nomatch, string:find(Source, ~"application:get_env(nova, listeners")),
     ?assertNotEqual(nomatch, string:find(Source, ~"cowboy_configuration")),
     ?assertNotEqual(
         nomatch, string:find(Source, ~"{ok, _} = application:ensure_all_started(blog)")

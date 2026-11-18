@@ -18,17 +18,19 @@
  {nova, [
      {use_stacktrace, true},
      {environment, dev},
-     {cowboy_configuration, #{
-         port => 8080,
-         %% arizona_nova:middlewares() spelled out: sys.config only takes terms.
-         middleware_handlers => [
-             arizona_cowboy_middleware,
-             nova_router,
-             nova_plugin_handler,
-             nova_security_handler,
-             nova_handler,
-             nova_plugin_handler
-         ]
+     {listeners, #{
+         web => #{
+             port => 8080,
+             %% arizona_nova:middlewares() spelled out: sys.config only takes terms.
+             steps => [
+                 arizona_cowboy_middleware,
+                 nova_router,
+                 nova_plugin_handler,
+                 nova_security_handler,
+                 nova_handler,
+                 nova_plugin_handler
+             ]
+         }
      }},
      {bootstrap_application, {{name}}},
      {plugins, [

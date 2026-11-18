@@ -21,9 +21,9 @@
  {nova, [
          {use_stacktrace, true},
          {environment, dev},
-         {cowboy_configuration, #{
-                                  port => 8080
-                                 }},
+         {listeners, #{
+                       web => #{port => 8080}
+                      }},
          {bootstrap_application, {{name}}}, %% Bootstraps the application
          %% Plugins is written on form {RequestType, Module, Options, Priority}
          %% Priority is that the lowest number is executed first
