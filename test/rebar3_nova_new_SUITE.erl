@@ -17,6 +17,8 @@
     template_erlydtl_provider_hooks/1,
     combined_kura_arizona_ci/1,
     kura_pgo_mutually_exclusive/1,
+    roadrunner_project/1,
+    roadrunner_exclusive/1,
     existing_dir_aborts/1,
     sys_configs_are_valid_terms/1,
     dev_logger_uses_flatlog_handler/1,
@@ -56,6 +58,8 @@ all() ->
         template_erlydtl_provider_hooks,
         combined_kura_arizona_ci,
         kura_pgo_mutually_exclusive,
+        roadrunner_project,
+        roadrunner_exclusive,
         existing_dir_aborts,
         sys_configs_are_valid_terms,
         dev_logger_uses_flatlog_handler,
@@ -386,6 +390,31 @@ kura_pgo_mutually_exclusive(_Config) ->
     Flags = (default_flags())#{kura => true, pgo => true},
     ?assertMatch({error, _}, rebar3_nova_new:validate_flags(Flags)),
     ok.
+
+%% A project has one server package: the one it depends on is the one its
+%% application starts.
+roadrunner_project(_Config) ->
+    Name = "testapp_roadrunner",
+    rebar3_nova_new:generate_project(Name, (default_flags())#{roadrunner => true}),
+    Deps = prop(deps, consult_rebar_config(Name)),
+    ?assertEqual({nova, "~> 1.0"}, lists:keyfind(nova, 1, Deps)),
+    ?assertEqual({nova_roadrunner, "~> 1.0"}, lists:keyfind(nova_roadrunner, 1, Deps)),
+    ?assertEqual(false, lists:keyfind(nova_cowboy, 1, Deps)),
+    {ok, [{application, testapp_roadrunner, App}]} =
+        file:consult(filename:join([Name, "src", "testapp_roadrunner.app.src"])),
+    ?assertEqual(nova_roadrunner, lists:last(prop(applications, App))),
+    ?assertNot(lists:member(nova_cowboy, prop(applications, App))),
+    {ok, [DevTerms]} = file:consult(filename:join([Name, "config", "dev_sys.config.src"])),
+    ?assertEqual(#{web => #{port => 8080}}, prop(listeners, prop(nova, DevTerms))).
+
+roadrunner_exclusive(_Config) ->
+    Roadrunner = (default_flags())#{roadrunner => true},
+    ?assertEqual(ok, rebar3_nova_new:validate_flags(Roadrunner)),
+    ?assertEqual(
+        ok, rebar3_nova_new:validate_flags(Roadrunner#{kura => true, docker => true, lfe => true})
+    ),
+    ?assertMatch({error, _}, rebar3_nova_new:validate_flags(Roadrunner#{arizona => true})),
+    ?assertMatch({error, _}, rebar3_nova_new:validate_flags(Roadrunner#{otel => true})).
 
 existing_dir_aborts(_Config) ->
     Name = "testapp_exists",
@@ -888,7 +917,8 @@ default_flags() ->
         lfe => false,
         ci => false,
         docker => false,
-        otel => false
+        otel => false,
+        roadrunner => false
     }.
 
 assert_file_exists(Base, RelPath) ->

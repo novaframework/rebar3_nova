@@ -50,6 +50,7 @@ Then just call your plugin directly in an existing application:
 | `--arizona` | `arizona_nova`, a live page at `/` with a layout, and the `arizona_nova` routes and middleware chain in the configs. Arizona needs OTP 29. |
 | `--otel` | OpenTelemetry deps and `opentelemetry_nova:setup()` at start |
 | `--lfe` | LFE sources instead of Erlang |
+| `--roadrunner` | The `nova_roadrunner` server package where the project otherwise has `nova_cowboy` (not together with `--arizona` or `--otel`, which are for Cowboy) |
 | `--ci` | A GitHub Actions workflow |
 | `--docker` | A multi-stage `Dockerfile` (OTP 29 builder, Debian trixie runtime) |
 
@@ -61,7 +62,7 @@ Releases keep distribution private by default: the node is named `my_app@localho
 
 With `--kura` or `--pgo`, the prod config connects to PostgreSQL over TLS, verifying the server certificate against the OS trust store (for `--pgo`, `/etc/ssl/certs/ca-certificates.crt` and a `DATABASE_HOST` that is a host name); set `DATABASE_SSL=false` (`DB_SSL` in `nova_fullstack`) only for a database on the same host or a private network. The `--docker` image runs as an unprivileged `app` user that can write only `log` and the configs rendered into `releases/<vsn>` (the release itself stays owned by root), needs `RELEASE_COOKIE` at run time, and `SECRET_KEY_BASE` with a Nova later than 0.18 (`docker run -e RELEASE_COOKIE="$(openssl rand -hex 32)" -e SECRET_KEY_BASE="$(openssl rand -base64 48)" -p 8080:8080 <image>`), its base images are pinned by digest, and a `.dockerignore` keeps `_build`, `.git` and `.env` out of the build context. The development `docker-compose.yml` publishes PostgreSQL on `127.0.0.1` only.
 
-Generated projects target OTP 29 and rebar3 3.27 (`.tool-versions`), depend on `{nova, "~> 1.0"}` with the `{nova_cowboy, "~> 1.0"}` server package, and list `{rebar3_nova, "~> 0.13"}` as a project plugin.
+Generated projects target OTP 29 and rebar3 3.27 (`.tool-versions`), depend on `{nova, "~> 1.0"}` with the `{nova_cowboy, "~> 1.0"}` server package (`{nova_roadrunner, "~> 1.0"}` with `--roadrunner`), and list `{rebar3_nova, "~> 0.13"}` as a project plugin.
 
 ## Commands
 

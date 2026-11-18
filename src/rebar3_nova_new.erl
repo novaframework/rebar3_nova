@@ -15,7 +15,8 @@ init(State) ->
         {bare, true},
         {deps, ?DEPS},
         {example,
-            "rebar3 nova new myapp [--kura] [--pgo] [--arizona] [--lfe] [--ci] [--docker] [--otel]"},
+            "rebar3 nova new myapp [--kura] [--pgo] [--arizona] [--lfe] [--ci] [--docker] [--otel] "
+            "[--roadrunner]"},
         {opts, [
             {name, $n, "name", string, "Project name"},
             {kura, undefined, "kura", boolean, "Include Kura database layer"},
@@ -24,7 +25,9 @@ init(State) ->
             {lfe, undefined, "lfe", boolean, "Generate LFE source files"},
             {ci, undefined, "ci", boolean, "Generate GitHub Actions CI workflow"},
             {docker, undefined, "docker", boolean, "Generate Dockerfile"},
-            {otel, undefined, "otel", boolean, "Include OpenTelemetry instrumentation"}
+            {otel, undefined, "otel", boolean, "Include OpenTelemetry instrumentation"},
+            {roadrunner, undefined, "roadrunner", boolean,
+                "Run on the Roadrunner server instead of Cowboy"}
         ]},
         {short_desc, "Create a new Nova project"},
         {desc, "Create a new Nova project with composable flags"}
@@ -74,13 +77,22 @@ parse_flags(Opts) ->
         lfe => proplists:get_value(lfe, Opts, false),
         ci => proplists:get_value(ci, Opts, false),
         docker => proplists:get_value(docker, Opts, false),
-        otel => proplists:get_value(otel, Opts, false)
+        otel => proplists:get_value(otel, Opts, false),
+        roadrunner => proplists:get_value(roadrunner, Opts, false)
     }.
 
 validate_flags(#{kura := true, pgo := true}) ->
     {error,
         "--kura and --pgo are mutually exclusive: kura_postgres already brings its own "
         "PostgreSQL driver"};
+validate_flags(#{roadrunner := true, arizona := true}) ->
+    {error,
+        "--roadrunner and --arizona are mutually exclusive: the live views of arizona_nova "
+        "are served by a Cowboy middleware"};
+validate_flags(#{roadrunner := true, otel := true}) ->
+    {error,
+        "--roadrunner and --otel are mutually exclusive: opentelemetry_nova records the "
+        "requests of Cowboy"};
 validate_flags(_) ->
     ok.
 
@@ -166,8 +178,8 @@ rebar_erlydtl_opts(_) ->
 rebar_deps(Flags) ->
     BaseDeps =
         case maps:get(lfe, Flags) of
-            true -> [nova_deps(), "    {logjam, \"1.2.4\"}"];
-            false -> [nova_deps(), "    {flatlog, \"0.1.2\"}"]
+            true -> [nova_deps(Flags), "    {logjam, \"1.2.4\"}"];
+            false -> [nova_deps(Flags), "    {flatlog, \"0.1.2\"}"]
         end,
     KuraDep =
         case maps:get(kura, Flags) of
@@ -204,8 +216,11 @@ rebar_deps(Flags) ->
     ["{deps, [\n", BaseDeps, KuraDep, PgoDep, ArizonaDeps, LfeDep, OtelDeps, "\n]}.\n\n"].
 
 %% Nova and the server package it runs on.
-nova_deps() ->
-    "    {nova, \"~> 1.0\"},\n    {nova_cowboy, \"~> 1.0\"},\n".
+nova_deps(Flags) ->
+    ["    {nova, \"~> 1.0\"},\n    {", server_package(Flags), ", \"~> 1.0\"},\n"].
+
+server_package(#{roadrunner := true}) -> "nova_roadrunner";
+server_package(_Flags) -> "nova_cowboy".
 
 rebar_relx(Name, _Flags) ->
     [
@@ -404,7 +419,7 @@ app_src_applications(Flags) ->
         end,
     %% The server package starts the listeners, so it comes after what a
     %% request needs.
-    [Base, Kura, Pgo, Arizona, Otel, ",\n        nova_cowboy"].
+    [Base, Kura, Pgo, Arizona, Otel, ",\n        ", server_package(Flags)].
 
 %%======================================================================
 %% app.erl / app.lfe
