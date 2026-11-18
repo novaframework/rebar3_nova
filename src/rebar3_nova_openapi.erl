@@ -119,7 +119,7 @@ classify_route({Path, Method, #nova_handler_value{extra_state = Extra} = Value})
         _StaticErrorPageOrInlineFun ->
             []
     end;
-classify_route({_Path, _Method, _CowboyHandler}) ->
+classify_route({_Path, _Method, _ModuleHandler}) ->
     [].
 
 expand_methods('_', Path, Module, Function, Extra) ->

@@ -71,7 +71,7 @@ config_sections(Config, AppName, Settings) ->
             _ -> AppName
         end,
     BootstrapEnv = app_env(Config, Bootstrap),
-    NovaKeys = [{Key, lookup(Key, Default, NovaEnv)} || {Key, Default} <- nova_keys()],
+    NovaKeys = [{Key, lookup(Key, Default, NovaEnv)} || {Key, Default} <- nova_keys(NovaEnv)],
     BootstrapKeys = [
         {Key, bootstrap_value(Key, Default, BootstrapEnv, NovaEnv, Bootstrap)}
      || {Key, Default} <- bootstrap_keys()
@@ -93,11 +93,11 @@ checked_settings(Settings, NovaEnv) ->
 checked_value(secret_key_base, {set, _Secret}) -> secret;
 checked_value(_Key, Value) -> Value.
 
-nova_keys() ->
+nova_keys(NovaEnv) ->
     [
         {bootstrap_application, required},
         {environment, rebar3_nova_utils:default_environment()},
-        {cowboy_configuration, #{port => 8080}},
+        listeners_key(NovaEnv),
         {plugins, []},
         {use_stacktrace, false},
         {render_error_pages, true},
@@ -105,6 +105,18 @@ nova_keys() ->
         {session_manager, nova_session_ets},
         {dispatch_backend, persistent_term}
     ].
+
+%% Nova 1.0 reads `cowboy_configuration` only when `listeners` is not set.
+listeners_key(NovaEnv) ->
+    case
+        {
+            proplists:is_defined(listeners, NovaEnv),
+            proplists:is_defined(cowboy_configuration, NovaEnv)
+        }
+    of
+        {false, true} -> {cowboy_configuration, #{port => 8080}};
+        _ -> {listeners, #{default => #{port => 8080}}}
+    end.
 
 bootstrap_keys() ->
     [

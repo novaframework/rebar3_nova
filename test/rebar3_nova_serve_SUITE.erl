@@ -131,8 +131,8 @@ assert_reload_keeps(Options) ->
     _ = nova_router:compile([{?APP, Options}]),
     ?ROUTER:set_routes([#{routes => [{"/b", fun test_controller:b/1, #{methods => [get]}}]}]),
     ?assertEqual([?APP], rebar3_nova_serve:reload_routes(?ROUTER)),
-    {ok, _, #nova_handler_value{secure = Secure, plugins = Plugins}} =
-        nova_router:lookup_url('_', ~"/admin/b", ~"GET"),
+    {ok, _, Value} = nova_router:lookup_url('_', ~"/admin/b", ~"GET"),
+    #nova_handler_value{secure = Secure, plugins = Plugins} = rebar3_nova_dispatch:payload(Value),
     ?assertEqual(fun test_security:deny/1, Secure),
     ?assert(lists:member({fun nova_request_plugin:pre_request/4, #{}}, callbacks(Plugins))).
 

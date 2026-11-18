@@ -58,7 +58,7 @@ print_route({Host, Path, Method, Payload}) ->
         [
             rebar3_nova_dispatch:method_to_binary(Method),
             format_path(Path),
-            format_handler(Payload),
+            format_handler(rebar3_nova_dispatch:payload(Payload)),
             format_host(Host)
         ]
     ).
@@ -80,7 +80,7 @@ format_handler(#nova_handler_value{module = undefined, function = undefined, cal
     io_lib:format("~ts:~ts/1", [Module, Function]);
 format_handler(#nova_handler_value{module = Module, function = Function}) ->
     io_lib:format("~ts:~ts/1", [Module, Function]);
-format_handler(#cowboy_handler_value{handler = Handler}) ->
-    io_lib:format("~ts (cowboy handler)", [Handler]);
+format_handler(#nova_module_value{handler = Handler}) ->
+    io_lib:format("~ts (handler module)", [Handler]);
 format_handler(Other) ->
     io_lib:format("~p", [Other]).

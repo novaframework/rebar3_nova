@@ -101,7 +101,13 @@ config_lists_current_nova_keys(_Config) ->
     ?assertEqual(missing, proplists:get_value(bootstrap_application, Nova)),
     ?assertEqual({default, true}, proplists:get_value(render_error_pages, Nova)),
     ?assertEqual({default, false}, proplists:get_value(use_strict_routing, Nova)),
-    ?assertEqual({default, nova_session_ets}, proplists:get_value(session_manager, Nova)).
+    ?assertEqual({default, nova_session_ets}, proplists:get_value(session_manager, Nova)),
+    ?assertEqual({default, #{default => #{port => 8080}}}, proplists:get_value(listeners, Nova)),
+    ?assertEqual(undefined, proplists:get_value(cowboy_configuration, Nova)),
+    Legacy = [{nova, [{cowboy_configuration, #{port => 9090}}]}],
+    [{nova, Before}, {app, _}] = rebar3_nova_config:config_sections(Legacy, app),
+    ?assertEqual({set, #{port => 9090}}, proplists:get_value(cowboy_configuration, Before)),
+    ?assertEqual(undefined, proplists:get_value(listeners, Before)).
 
 %% Nova 0.18 and earlier read an unset environment as dev. A Nova that has
 %% is_dev_environment/0 reads it as prod.

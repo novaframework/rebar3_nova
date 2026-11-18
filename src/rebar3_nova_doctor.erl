@@ -202,8 +202,9 @@ check_config(State) ->
 
 -doc """
 Findings for a sys.config. `json_lib` and `use_sessions` are read from the
-bootstrap application's env, as `nova:get_env/2` does; `session_manager`
-and `cowboy_configuration` from `nova`'s.
+bootstrap application's env, as `nova:get_env/2` does; `session_manager`,
+`listeners` and the `cowboy_configuration` of a Nova before 1.0 from
+`nova`'s.
 """.
 -spec config_findings([{atom(), term()}], atom(), json_lib_status()) -> [finding()].
 config_findings(Config, AppName, JsonStatus) ->
@@ -211,20 +212,45 @@ config_findings(Config, AppName, JsonStatus) ->
     Bootstrap = bootstrap_app(Config, AppName),
     BootstrapConfig = app_env(Config, Bootstrap),
     JsonLib = proplists:get_value(json_lib, BootstrapConfig, rebar3_nova_utils:default_json_lib()),
-    Cowboy = proplists:get_value(cowboy_configuration, NovaConfig, #{port => 8080}),
-    CowboyFinding =
-        case maps:get(port, Cowboy, undefined) of
-            undefined ->
-                {warn, "cowboy_configuration has no port", "Add #{port => 8080}"};
-            Port when is_integer(Port) ->
-                {ok, io_lib:format("listening on port ~b", [Port])};
-            BadPort ->
-                {error, io_lib:format("invalid port: ~p", [BadPort]), ""}
-        end,
     [json_finding(JsonLib, JsonStatus)] ++
         misplaced_json_lib(NovaConfig, Bootstrap) ++
-        [CowboyFinding] ++
+        listener_findings(NovaConfig) ++
         session_findings(NovaConfig, BootstrapConfig, Bootstrap).
+
+%% Nova 1.0 reads `listeners`, and `cowboy_configuration` when that is not
+%% set, which is the one key a Nova before 1.0 has.
+listener_findings(NovaConfig) ->
+    case proplists:get_value(listeners, NovaConfig, undefined) of
+        undefined ->
+            Legacy = proplists:get_value(cowboy_configuration, NovaConfig, #{port => 8080}),
+            [legacy_port(Legacy)];
+        Listeners when is_map(Listeners), map_size(Listeners) > 0 ->
+            [
+                listener_port(Name, Settings)
+             || Name := Settings <- maps:iterator(Listeners, ordered)
+            ];
+        Other ->
+            [{error, io_lib:format("listeners is not a map of listeners: ~p", [Other]), ""}]
+    end.
+
+legacy_port(#{port := Port}) when is_integer(Port) ->
+    {ok, io_lib:format("listening on port ~b", [Port])};
+legacy_port(#{port := BadPort}) ->
+    {error, io_lib:format("invalid port: ~p", [BadPort]), ""};
+legacy_port(_NoPort) ->
+    {warn, "cowboy_configuration has no port", "Add #{port => 8080}"}.
+
+%% A listener without a port has Nova's: 8443 with tls, 8080 without.
+listener_port(Name, #{port := Port}) when is_integer(Port) ->
+    {ok, io_lib:format("listener ~p on port ~b", [Name, Port])};
+listener_port(Name, #{port := BadPort}) ->
+    {error, io_lib:format("listener ~p has an invalid port: ~p", [Name, BadPort]), ""};
+listener_port(Name, #{tls := Tls}) when Tls =/= false ->
+    {ok, io_lib:format("listener ~p on port 8443", [Name])};
+listener_port(Name, Settings) when is_map(Settings) ->
+    {ok, io_lib:format("listener ~p on port 8080", [Name])};
+listener_port(Name, Other) ->
+    {error, io_lib:format("listener ~p is not a map: ~p", [Name, Other]), ""}.
 
 -type json_lib_status() :: ok | missing | incomplete | raw_json_unsupported.
 -type finding() :: {ok, iodata()} | {warn | error, iodata(), iodata()}.
@@ -450,7 +476,7 @@ extract_handler({Path, Method, Payload}) ->
     case rebar3_nova_dispatch:handler(Payload) of
         {controller, Module, Function} -> {Path, Method, Module, Function, 1};
         {anonymous, Module} -> {Path, Method, Module, '$callback', captured};
-        {cowboy, Handler} -> {Path, Method, Handler, init, 2};
+        {module, Handler} -> {Path, Method, Handler, init, 2};
         static -> {Path, Method, nova_file_controller, '$callback', captured};
         error_page -> {Path, Method, nova_error_controller, '$callback', captured};
         unknown -> {Path, Method, unknown, unknown, 1}

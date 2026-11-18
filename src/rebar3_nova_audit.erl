@@ -140,9 +140,9 @@ coverage(Env, Apps, Dispatch, Config) ->
         rebar3_nova_dispatch:handler(P)
      || {_, _, P} <- rebar3_nova_dispatch:routes(Dispatch)
     ],
-    Cowboy = length([H || {cowboy, _} = H <- Handlers]),
+    Modules = length([H || {module, _} = H <- Handlers]),
     NotCovered =
-        [io_lib:format("~b websocket/cowboy handler route(s)", [Cowboy]) || Cowboy > 0] ++
+        [io_lib:format("~b websocket/handler module route(s)", [Modules]) || Modules > 0] ++
             ["static files and error pages"] ++
             [
                 "arizona_nova routes (served before nova_router)"
@@ -302,7 +302,7 @@ classify_route({Path, Method, #nova_handler_value{secure = Secure} = Value}) ->
         _StaticOrErrorPage ->
             []
     end;
-classify_route({_Path, _Method, _CowboyHandler}) ->
+classify_route({_Path, _Method, _ModuleHandler}) ->
     [].
 
 expand_methods('_', Path, Module, Secure) ->

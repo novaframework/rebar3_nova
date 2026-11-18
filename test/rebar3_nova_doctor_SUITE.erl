@@ -40,7 +40,8 @@
     settings_removed_setting_is_an_error/1,
     settings_under_the_bootstrap_app_warn/1,
     settings_of_the_nova_under_test/1,
-    routes_refused_setting_is_named/1
+    routes_refused_setting_is_named/1,
+    config_listeners/1
 ]).
 
 -define(SETTINGS, rebar3_nova_test_settings).
@@ -80,6 +81,7 @@ all() ->
         settings_under_the_bootstrap_app_warn,
         settings_of_the_nova_under_test,
         routes_refused_setting_is_named,
+        config_listeners,
         security_env_needs_an_exact_gitignore_line,
         security_flags_a_literal_cookie,
         security_asks_git_about_env
@@ -211,6 +213,30 @@ config_sessions_disabled(_Config) ->
     Config = [{nova, [{bootstrap_application, blog}]}, {blog, [{use_sessions, false}]}],
     ?assertEqual([], warnings(Config)),
     ?assertMatch([_], [M || "sessions disabled" ++ _ = M <- ok_messages(Config)]).
+
+%% Nova 1.0 has named listeners. `cowboy_configuration` is read when there
+%% are none, as on a Nova before 1.0.
+config_listeners(_Config) ->
+    Named = [
+        {nova, [
+            {bootstrap_application, blog},
+            {listeners, #{web => #{port => 8080}, admin => #{tls => #{}}, plain => #{}}},
+            {cowboy_configuration, #{port => 9090}}
+        ]}
+    ],
+    ?assertEqual([], warnings(Named)),
+    Ports = [M || "listener " ++ _ = M <- ok_messages(Named)],
+    ?assertEqual(
+        ["listener admin on port 8443", "listener plain on port 8080", "listener web on port 8080"],
+        Ports
+    ),
+    Legacy = [{nova, [{bootstrap_application, blog}, {cowboy_configuration, #{port => 9090}}]}],
+    ?assert(lists:member("listening on port 9090", ok_messages(Legacy))),
+    Broken = [{nova, [{bootstrap_application, blog}, {listeners, #{web => #{port => "8080"}}}]}],
+    ?assertMatch([{error, _, _}], warnings(Broken)),
+    ?assertMatch(
+        [{error, _, _}], warnings([{nova, [{bootstrap_application, blog}, {listeners, []}]}])
+    ).
 
 %%======================================================================
 %% environment_findings/2, settings_findings/3, route_findings/1
